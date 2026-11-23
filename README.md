@@ -4,11 +4,11 @@ Mac Evra POS is an employee-assisted iPhone retail point-of-sale interface for a
 
 ## Current status
 
-The employee sale flow and manager workspace remain a frontend demonstration. Phase 1 adds version-controlled Supabase configuration, SSR clients, session-cookie refresh, foundational identity/RBAC tables, explicit Row Level Security policies, a safe development store seed, and pgTAP policy tests.
+The employee sale flow and manager workspace remain a frontend demonstration. Phase 1 provides Supabase configuration, SSR clients, session-cookie refresh, foundational identity/RBAC tables, explicit Row Level Security policies, a safe development store seed, and pgTAP policy tests.
 
-The Phase 1 migration has **not** been applied to the hosted project. Inventory, sales, payments, trade-ins, refunds, receipts, and reports still use the existing demonstration data and are intentionally outside this phase.
+The Phase 1 migration has been applied to the hosted project. Phase 2 now prepares persistent inventory, append-only inventory history, and atomic reservation RPCs for review; the Phase 2 migration has **not** been applied remotely. Sales, payments, customers, trade-ins, refunds, receipts, and reports remain demonstration data and are outside Phase 2.
 
-Shared physical-device records remain centralised in `src/lib/inventory.ts`. Other manager preview records remain in `src/lib/manager-data.ts`. The selected device, customer, and demo payment are still handed between sale pages with `sessionStorage`; this does not reserve or sell inventory.
+Shared demonstration devices remain centralised in `src/lib/inventory.ts` so the unsigned frontend stays functional. Secure server-only inventory functions are ready in `src/lib/inventory-server.ts`, but the UI is intentionally not connected until an approved employee sign-in flow exists. The selected demo device, customer, and payment are still handed between sale pages with `sessionStorage`; this does not reserve or sell inventory.
 
 ### Employee routes
 
@@ -45,19 +45,23 @@ The hosted project inspected for this repository is:
 - Region: `eu-west-1`
 - PostgreSQL: 17
 
-It was an empty, healthy Supabase project when inspected: no application tables, Auth users, Storage buckets, Edge Functions, or user-created migrations existed. Hosted Auth changes and database migrations remain pending explicit approval.
+It was an empty, healthy Supabase project when first inspected: no application tables, Auth users, Storage buckets, Edge Functions, or user-created migrations existed. The reviewed Phase 1 migration was later applied; hosted Auth settings remain unchanged, and Phase 2 remains review-only.
 
-Foundation files:
+Backend files:
 
 - `supabase/config.toml` — local Supabase configuration aligned to PostgreSQL 17
 - `supabase/migrations/20261123060000_phase_01_foundation.sql` — stores, profiles, RBAC, memberships, invitations, audit foundation, grants, and RLS
-- `supabase/seed.sql` — one clearly labelled local development store; no users or credentials
-- `supabase/tests/001_foundation_rls.test.sql` — pgTAP role, privilege, override, RLS, and audit immutability checks
+- `supabase/migrations/20261123120000_phase_02_inventory.sql` — persistent physical inventory, history, reservation lifecycle, atomic RPCs, grants, and RLS; review-only and not applied remotely
+- `supabase/seed.sql` — one clearly labelled local development store; no users, credentials, inventory, or financial records
+- `supabase/tests/001_foundation_rls.test.sql` — pgTAP foundation policy tests
+- `supabase/tests/002_inventory_reservations.test.sql` — pgTAP inventory integrity, isolation, permission, reservation, expiry, release, and history tests
+- `scripts/test-inventory-concurrency.mjs` — local-only two-client reservation contention test
 - `src/lib/supabase/client.ts` — browser client
 - `src/lib/supabase/server.ts` — cookie-aware Server Component/server-action client
+- `src/lib/inventory-server.ts` — authenticated server-only inventory reads and reservation RPC wrappers
 - `src/lib/supabase/proxy.ts` and `src/proxy.ts` — Next.js 16 session refresh
 
-See `docs/supabase-foundation.md` for the table and policy summary.
+See `docs/supabase-foundation.md` for Phase 1 and `docs/inventory-phase-2.md` for the Phase 2 schema, lifecycle, security, and integration boundary.
 
 ## Local setup
 
@@ -148,9 +152,10 @@ npm run typecheck
 npm run build
 npm run db:lint
 npm run db:test
+npm run db:test:inventory-concurrency
 ```
 
-The database commands require the local Supabase Docker stack. The app uses a system font stack, so production builds do not depend on downloading a Google font.
+The database commands require the local Supabase Docker stack. The concurrency test refuses non-local Supabase URLs and creates disposable local Auth/inventory fixtures; reset the local database afterwards. The app uses a system font stack, so production builds do not depend on downloading a Google font.
 
 ## Security boundaries
 
@@ -161,12 +166,15 @@ The database commands require the local Supabase Docker stack. The app uses a sy
 - Direct client writes to memberships, invitations, role assignments, overrides, stores, and audit events are denied.
 - A member may update only their own `display_name` and `phone` columns.
 - Permission overrides take precedence over role defaults.
-- Audit events are append-only and reject update/delete operations.
+- Audit events and inventory movements are append-only and reject update/delete operations.
+- Physical-device IMEIs are globally unique and must pass 15-digit Luhn validation.
+- Inventory reservation, release, and expiry are transactional RPCs that recheck membership and permissions.
+- Normal employees cannot read acquisition cost or write inventory tables directly.
 - Service-role access is reserved for trusted server operations and is never used by browser code.
-- No inventory, sale, payment, or financial state is represented as authoritative yet.
+- Persistent inventory is prepared but not connected to the unsigned demonstration UI; no sale, payment, or financial state is authoritative yet.
 
 ## Important production blockers
 
-Later phases must add persistent customers and inventory, unique IMEI enforcement, atomic reservations, transactional sales, trusted split-payment confirmation, trade-in inspection/valuation/approval, receipts, refunds, returns, reporting, provider reconciliation, monitoring, backups, and end-to-end tests.
+Later phases must add persistent customers, authenticated UI integration, trusted inventory intake/adjustment commands, transactional sales, trusted split-payment confirmation, trade-in inspection/valuation/approval, receipts, refunds, returns, reporting, provider reconciliation, monitoring, backups, and end-to-end tests.
 
 Employee-entered payment references, UI inspection results, and preview approval decisions remain unverified demonstration data until those trusted workflows are implemented.
