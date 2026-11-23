@@ -72,11 +72,11 @@ select lives_ok(
 select throws_ok(
  $$select public.update_staff_membership(
    '00000000-0000-4000-8000-000000000004',
-   '20000000-0000-4000-8000-000000000044',
+   '20000000-0000-4000-8000-000000000043',
    'employee', null
  )$$,
  '23514', null,
- 'Store cannot remove its last other active administrator'
+ 'Administrator cannot modify their own role'
 );
 
 reset role;
