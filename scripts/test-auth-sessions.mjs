@@ -114,31 +114,49 @@ function findConfirmationUrl(value, acceptanceToken) {
 }
 
 async function readConfirmationEmail(email, acceptanceToken) {
-  const mailboxUrl = `${inbucketUrl.replace(/\/$/, "")}/api/v1/mailbox/${encodeURIComponent(email)}`
+  const baseUrl = inbucketUrl.replace(/\/$/, "")
+  const mailboxUrl = `${baseUrl}/api/v1/mailbox/${encodeURIComponent(email)}`
+  const mailpitUrl = `${baseUrl}/api/v1/messages`
   const deadline = Date.now() + 15_000
-  let diagnostic = { mailboxStatus: 0, messageCount: 0, messageKeys: [], detailStatus: 0, detailKeys: [], hasConfirmPath: false, hasToken: false }
+  let diagnostic = { mailboxStatus: 0, mailpitStatus: 0, messageCount: 0, messageKeys: [], detailStatus: 0, detailKeys: [], hasConfirmPath: false, hasToken: false }
 
   while (Date.now() < deadline) {
-    const response = await fetch(mailboxUrl)
-    diagnostic.mailboxStatus = response.status
-    if (response.ok) {
-      const payload = await response.json()
-      const messages = Array.isArray(payload) ? payload : (payload.messages ?? [])
-      diagnostic.messageCount = messages.length
-      diagnostic.messageKeys = Object.keys(messages[0] ?? {})
-      for (const message of messages) {
-        const detailResponse = await fetch(`${mailboxUrl}/${encodeURIComponent(message.id)}`)
-        diagnostic.detailStatus = detailResponse.status
-        if (!detailResponse.ok) continue
-        const detail = await detailResponse.json()
-        const serialized = JSON.stringify(detail)
-        diagnostic.detailKeys = Object.keys(detail ?? {})
-        diagnostic.hasConfirmPath ||= serialized.includes("/auth/confirm")
-        diagnostic.hasToken ||= serialized.includes(acceptanceToken)
-        const confirmationUrl = findConfirmationUrl(serialized, acceptanceToken)
-        if (confirmationUrl) return new URL(confirmationUrl)
+    const mailboxResponse = await fetch(mailboxUrl)
+    diagnostic.mailboxStatus = mailboxResponse.status
+
+    let messages = []
+    let detailUrl = (message) => `${mailboxUrl}/${encodeURIComponent(message.id)}`
+    if (mailboxResponse.ok) {
+      const payload = await mailboxResponse.json()
+      messages = Array.isArray(payload) ? payload : (payload.messages ?? [])
+    } else {
+      // Supabase CLI v3 serves Mailpit on the historical Inbucket port.
+      const mailpitResponse = await fetch(mailpitUrl)
+      diagnostic.mailpitStatus = mailpitResponse.status
+      if (mailpitResponse.ok) {
+        const payload = await mailpitResponse.json()
+        messages = (payload.messages ?? []).filter((message) =>
+          JSON.stringify(message.To ?? message.to ?? []).toLowerCase().includes(email.toLowerCase())
+        )
+        detailUrl = (message) => `${baseUrl}/api/v1/message/${encodeURIComponent(message.ID ?? message.id)}`
       }
     }
+
+    diagnostic.messageCount = messages.length
+    diagnostic.messageKeys = Object.keys(messages[0] ?? {})
+    for (const message of messages) {
+      const detailResponse = await fetch(detailUrl(message))
+      diagnostic.detailStatus = detailResponse.status
+      if (!detailResponse.ok) continue
+      const detail = await detailResponse.json()
+      const serialized = JSON.stringify(detail)
+      diagnostic.detailKeys = Object.keys(detail ?? {})
+      diagnostic.hasConfirmPath ||= serialized.includes("/auth/confirm")
+      diagnostic.hasToken ||= serialized.includes(acceptanceToken)
+      const confirmationUrl = findConfirmationUrl(serialized, acceptanceToken)
+      if (confirmationUrl) return new URL(confirmationUrl)
+    }
+
     await new Promise((resolve) => setTimeout(resolve, 250))
   }
 
