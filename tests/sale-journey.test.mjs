@@ -2,6 +2,7 @@ import assert from "node:assert/strict"
 import test from "node:test"
 
 import {
+  employeeSaleResumeStep,
   employeeSaleStepHref,
   findInventoryByImei,
   normalizeImeiEntry,
@@ -27,6 +28,13 @@ test("sale journey links safely encode persisted sale identifiers", () => {
     "/new-sale/customer-info?sale=sale%2Fid%3Funsafe%3Dtrue"
   )
   assert.equal(employeeSaleStepHref("imei"), "/new-sale")
+})
+
+test("an unfinished sale resumes automatically without exposing a draft list", () => {
+  assert.equal(employeeSaleResumeStep(0, false), "imei")
+  assert.equal(employeeSaleResumeStep(1, false), "customer")
+  assert.equal(employeeSaleResumeStep(1, true), "review")
+  assert.equal(employeeSaleResumeStep(2, true), "imei")
 })
 
 test("IMEI entry removes formatting without hiding extra digits", () => {

@@ -16,6 +16,11 @@ export function employeeSaleStepHref(step: EmployeeSaleStep, saleId?: string) {
   return saleId ? `${path}?sale=${encodeURIComponent(saleId)}` : path
 }
 
+export function employeeSaleResumeStep(activeItemCount: number, hasCustomer: boolean): EmployeeSaleStep {
+  if (activeItemCount !== 1) return "imei"
+  return hasCustomer ? "review" : "customer"
+}
+
 export function normalizeImeiEntry(value: string) {
   return value.replace(/\D/g, "")
 }

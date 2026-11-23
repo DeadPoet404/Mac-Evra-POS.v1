@@ -1,4 +1,4 @@
-import { CircleAlert, FilePlus2, Smartphone, Trash2 } from "lucide-react"
+import { CircleAlert, FilePlus2, Smartphone } from "lucide-react"
 import Link from "next/link"
 import { redirect } from "next/navigation"
 
@@ -11,9 +11,9 @@ import { ImeiVerification } from "@/app/new-sale/imei-verification"
 import { EmployeeHeader } from "@/components/employee/employee-header"
 import { requirePermissions } from "@/lib/auth/server"
 import { listAuthorizedInventory } from "@/lib/inventory-server"
-import { employeeSaleStepHref } from "@/lib/sale-journey"
+import { employeeSaleResumeStep, employeeSaleStepHref } from "@/lib/sale-journey"
 import { formatPesewas } from "@/lib/sales"
-import { getPersistentSale, listEmployeeSales, type PersistentSale } from "@/lib/sales-server"
+import { getPersistentSale, listEmployeeSales } from "@/lib/sales-server"
 
 const errors: Record<string, string> = {
   "draft-create-failed": "The sale could not be started. Try again.",
@@ -24,14 +24,6 @@ const errors: Record<string, string> = {
   "cancel-failed": "The sale could not be cancelled.",
 }
 
-function resumeHref(sale: PersistentSale) {
-  if (sale.status !== "draft") return employeeSaleStepHref("status", sale.id)
-  const itemCount = sale.items.filter((item) => item.status === "active").length
-  if (itemCount !== 1) return employeeSaleStepHref("imei", sale.id)
-  if (!sale.customer) return employeeSaleStepHref("customer", sale.id)
-  return employeeSaleStepHref("review", sale.id)
-}
-
 export default async function NewSalePage({
   searchParams,
 }: {
@@ -39,11 +31,21 @@ export default async function NewSalePage({
 }) {
   const { access, membership } = await requirePermissions(["create_sales"], { nextPath: "/new-sale" })
   const params = await searchParams
-  const [savedSales, inventory, selectedSale] = await Promise.all([
-    listEmployeeSales(membership.storeId, access.userId!),
-    listAuthorizedInventory(membership.storeId),
-    params.sale ? getPersistentSale(membership.storeId, params.sale) : Promise.resolve(null),
-  ])
+  const selectedSale = params.sale ? await getPersistentSale(membership.storeId, params.sale) : null
+
+  if (!params.sale) {
+    const savedSales = await listEmployeeSales(membership.storeId, access.userId!)
+    const currentSale = savedSales.find((sale) => sale.status === "draft")
+    if (currentSale) {
+      const activeItemCount = currentSale.items.filter((item) => item.status === "active").length
+      redirect(employeeSaleStepHref(
+        employeeSaleResumeStep(activeItemCount, Boolean(currentSale.customer)),
+        currentSale.id
+      ))
+    }
+  }
+
+  const inventory = selectedSale ? await listAuthorizedInventory(membership.storeId) : []
 
   if (selectedSale && params.notice === "item-added") {
     redirect(employeeSaleStepHref("customer", selectedSale.id))
@@ -84,26 +86,6 @@ export default async function NewSalePage({
                 </button>
               </form>
             </section>
-
-            {savedSales.length ? (
-              <section>
-                <h2 className="text-sm font-semibold">Continue a saved sale</h2>
-                <div className="mt-3 space-y-2">
-                  {savedSales.map((sale) => {
-                    const item = sale.items.find((candidate) => candidate.status === "active")
-                    return (
-                      <Link key={sale.id} href={resumeHref(sale)} className="flex items-center justify-between gap-4 rounded-2xl border border-[#E8E8ED] bg-white p-4 transition hover:border-[#D8C4CB]">
-                        <div className="min-w-0">
-                          <p className="truncate font-semibold">{item?.description ?? "Device not selected"}</p>
-                          <p className="mt-1 font-mono text-xs text-[#86868B]">{sale.saleNumber}</p>
-                        </div>
-                        <p className="shrink-0 font-semibold text-[#6E0728]">{formatPesewas(sale.totalPesewas)}</p>
-                      </Link>
-                    )
-                  })}
-                </div>
-              </section>
-            ) : null}
           </div>
         ) : !selectedSale ? (
           <section className="mt-8 rounded-3xl border border-dashed border-[#D8D8DC] bg-white p-10 text-center">
@@ -112,21 +94,15 @@ export default async function NewSalePage({
             <Link href="/new-sale" className="mt-4 inline-block text-sm font-semibold text-[#6E0728]">Start another sale</Link>
           </section>
         ) : activeItems.length > 1 ? (
-          <section className="mt-8 rounded-3xl border border-[#E8C9D2] bg-white p-6">
-            <h2 className="font-semibold text-[#6E0728]">Choose one device</h2>
-            <p className="mt-2 text-sm text-[#68686D]">This saved sale contains multiple devices from the previous interface. Remove devices until one remains.</p>
-            <div className="mt-5 divide-y divide-[#EFEFF1]">
-              {activeItems.map((item) => (
-                <div key={item.id} className="flex items-center justify-between gap-4 py-4">
-                  <div className="min-w-0"><p className="truncate font-medium">{item.description}</p><p className="mt-1 font-mono text-xs text-[#86868B]">{item.imei}</p></div>
-                  <form action={removeSaleItemAction}>
-                    <input type="hidden" name="saleId" value={selectedSale.id} />
-                    <input type="hidden" name="saleItemId" value={item.id} />
-                    <button type="submit" aria-label={`Remove ${item.description}`} className="flex size-10 items-center justify-center rounded-full bg-[#F7F7F8] text-[#6E0728]"><Trash2 size={17} /></button>
-                  </form>
-                </div>
-              ))}
-            </div>
+          <section className="mt-8 rounded-3xl border border-[#E8C9D2] bg-white p-8 text-center">
+            <CircleAlert className="mx-auto size-8 text-[#6E0728]" />
+            <h2 className="mt-4 text-xl font-semibold">Start this sale again</h2>
+            <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-[#68686D]">This older sale cannot continue in the simplified checkout.</p>
+            <form action={cancelSaleAction} className="mt-6">
+              <input type="hidden" name="saleId" value={selectedSale.id} />
+              <input type="hidden" name="reason" value="restarted from simplified employee checkout" />
+              <button type="submit" className="h-14 w-full rounded-full bg-[#6E0728] px-8 text-base font-semibold text-white sm:w-auto">Start again</button>
+            </form>
           </section>
         ) : selectedItem ? (
           <div className="mt-8 space-y-5">
