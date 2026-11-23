@@ -143,9 +143,9 @@ $$;
 
 revoke all on function public.update_staff_membership(uuid, uuid, text, text)
   from public, anon, authenticated, service_role;
-grant execute on function public.update_staff_membership(uuid, text, text) to authenticated;
+grant execute on function public.update_staff_membership(uuid, uuid, text, text) to authenticated;
 
-comment on function public.update_staff_membership(uuid, text, text) is
+comment on function public.update_staff_membership(uuid, uuid, text, text) is
   'Store-scoped staff role/status update. Prevents self-change, enforces administrator-only elevated access and preserves an active administrator.';
 
 commit;
