@@ -74,7 +74,7 @@ select throws_ok(
    '00000000-0000-4000-8000-000000000004',
    '20000000-0000-4000-8000-000000000043',
    'employee', null
- )$,
+ )$$,
  '42501', null,
  'Administrator cannot modify their own role'
 );
