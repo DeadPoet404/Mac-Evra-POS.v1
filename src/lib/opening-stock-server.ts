@@ -122,8 +122,16 @@ export type OpeningStockPriceChange = {
   createdAt: string
 }
 
+export type DeviceModelCatalogEntry = {
+  id: string
+  modelName: string
+  storageGb: number
+  catalogueId: string | null
+}
+
 export type OpeningStockDashboard = {
   models: OpeningStockModel[]
+  deviceModels: DeviceModelCatalogEntry[]
   invoices: OpeningStockInvoice[]
   lines: OpeningStockInvoiceLine[]
   reconciliations: OpeningStockInvoiceReconciliation[]
@@ -344,8 +352,9 @@ function mapPriceChange(value: unknown): OpeningStockPriceChange {
 export async function loadOpeningStockDashboard(storeId: string): Promise<OpeningStockDashboard> {
   parseUuid(storeId, "store")
   const supabase = await createClient()
-  const [models, invoices, lines, units, corrections, priceChanges, reconciliations] = await Promise.all([
+  const [models, deviceModels, invoices, lines, units, corrections, priceChanges, reconciliations] = await Promise.all([
     supabase.from("opening_stock_models_view").select("*").eq("store_id", storeId).order("created_at", { ascending: false }),
+    supabase.from("device_models").select("id, model_name, storage_gb").order("model_name", { ascending: true }).order("storage_gb", { ascending: true }),
     supabase.from("opening_stock_invoices_view").select("*").eq("store_id", storeId).order("created_at", { ascending: false }),
     supabase
       .from("opening_stock_invoice_lines_view")
@@ -373,11 +382,24 @@ export async function loadOpeningStockDashboard(storeId: string): Promise<Openin
       .order("invoice_date", { ascending: false }),
   ])
 
-  const errors = [models.error, invoices.error, lines.error, units.error, corrections.error, priceChanges.error, reconciliations.error]
+  const errors = [models.error, deviceModels.error, invoices.error, lines.error, units.error, corrections.error, priceChanges.error, reconciliations.error]
   if (errors.some(Boolean)) throw new Error("Opening-stock records could not be loaded.")
 
+  const mappedModels = (models.data ?? []).map((row) => mapModel(row as unknown))
+  const catalogueIdByDeviceModelId = new Map(mappedModels.map((model) => [model.deviceModelId, model.id]))
+
   return {
-    models: (models.data ?? []).map((row) => mapModel(row as unknown)),
+    models: mappedModels,
+    deviceModels: (deviceModels.data ?? []).map((row) => {
+      const record = requiredRecord(row, "device model")
+      const id = requiredString(record.id, "device model ID")
+      return {
+        id,
+        modelName: requiredString(record.model_name, "model name"),
+        storageGb: requiredInteger(record.storage_gb, "storage"),
+        catalogueId: catalogueIdByDeviceModelId.get(id) ?? null,
+      }
+    }),
     invoices: (invoices.data ?? []).map((row) => mapInvoice(row as unknown)),
     lines: (lines.data ?? []).map((row) => mapLine(row as unknown)),
     reconciliations: (reconciliations.data ?? []).map((row) => mapReconciliation(row as unknown)),
