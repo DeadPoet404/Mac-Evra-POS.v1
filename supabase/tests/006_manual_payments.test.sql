@@ -159,6 +159,7 @@ select ok(
   )),
   'Payment completion fulfils each active reservation'
 );
+reset role;
 select is(
   (select count(*)::integer from public.inventory_movements where movement_type = 'sold' and store_inventory_id in (
     '56000000-0000-4000-8000-000000000001','56000000-0000-4000-8000-000000000002','56000000-0000-4000-8000-000000000003'
@@ -171,6 +172,9 @@ select is(
   9,
   'Payment, sold-inventory and sale-completion attribution are audited'
 );
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '16000000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"16000000-0000-4000-8000-000000000001","role":"authenticated"}', true);
 
 with ranked as (
   select id, row_number() over (order by created_at, id) as position from public.sales
@@ -245,6 +249,7 @@ select throws_ok(
   '23514', 'customer details require a completed paid sale',
   'Post-payment customer RPC rejects an unpaid sale'
 );
+reset role;
 select throws_ok(
   $$update public.sale_payments set transaction_reference = 'rewritten' where payment_method = 'cash'$$,
   'P0001', 'sale payments are immutable',
@@ -255,6 +260,9 @@ select throws_ok(
   'P0001', 'sale payments are immutable',
   'Confirmed payments cannot be deleted'
 );
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '16000000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"16000000-0000-4000-8000-000000000001","role":"authenticated"}', true);
 select set_config(
   'test.phase6_foreign_sale',
   (select id::text from public.sales where status = 'draft' order by created_at, id limit 1),
@@ -283,13 +291,8 @@ set local role authenticated;
 select set_config('request.jwt.claim.sub', '16000000-0000-4000-8000-000000000002', true);
 select set_config('request.jwt.claims', '{"sub":"16000000-0000-4000-8000-000000000002","role":"authenticated"}', true);
 select is((select count(*)::integer from public.sale_payments), 0, 'Payment RLS hides another employee payment');
-with owner_unpaid as (
-  select id from public.sales
-  where created_by_user_id = '16000000-0000-4000-8000-000000000001' and status = 'draft'
-  order by created_at, id limit 1
-)
 select throws_ok(
-  format($$select * from public.confirm_sale_payment('%s', 'cash', 850000, null, true)$$, (select id from owner_unpaid)),
+  $$select * from public.confirm_sale_payment(current_setting('test.phase6_foreign_sale')::uuid, 'cash', 850000, null, true)$$,
   '42501', 'only the sale owner can confirm payment',
   'Same-store employee cannot confirm another employee sale'
 );
