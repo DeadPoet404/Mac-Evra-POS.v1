@@ -35,11 +35,15 @@ export default async function NewSalePage({
 
   if (!params.sale) {
     const savedSales = await listEmployeeSales(membership.storeId, access.userId!)
-    const currentSale = savedSales.find((sale) => sale.status === "draft")
+    const currentSale = savedSales[0]
     if (currentSale) {
       const activeItemCount = currentSale.items.filter((item) => item.status === "active").length
       redirect(employeeSaleStepHref(
-        employeeSaleResumeStep(activeItemCount, Boolean(currentSale.customer)),
+        employeeSaleResumeStep(
+          activeItemCount,
+          currentSale.payment?.status === "confirmed",
+          Boolean(currentSale.customer)
+        ),
         currentSale.id
       ))
     }
@@ -48,10 +52,16 @@ export default async function NewSalePage({
   const inventory = selectedSale ? await listAuthorizedInventory(membership.storeId) : []
 
   if (selectedSale && params.notice === "item-added") {
-    redirect(employeeSaleStepHref("customer", selectedSale.id))
+    redirect(employeeSaleStepHref("payment", selectedSale.id))
   }
-  if (selectedSale && selectedSale.status !== "draft") {
-    redirect(employeeSaleStepHref("status", selectedSale.id))
+  if (selectedSale?.status === "awaiting_payment") {
+    redirect(employeeSaleStepHref("payment", selectedSale.id))
+  }
+  if (selectedSale?.status === "completed") {
+    redirect(employeeSaleStepHref(selectedSale.customer ? "complete" : "customer", selectedSale.id))
+  }
+  if (selectedSale?.status === "cancelled") {
+    redirect(employeeSaleStepHref("complete", selectedSale.id))
   }
 
   const activeItems = selectedSale?.items.filter((item) => item.status === "active") ?? []
@@ -97,10 +107,10 @@ export default async function NewSalePage({
           <section className="mt-8 rounded-3xl border border-[#E8C9D2] bg-white p-8 text-center">
             <CircleAlert className="mx-auto size-8 text-[#6E0728]" />
             <h2 className="mt-4 text-xl font-semibold">Start this sale again</h2>
-            <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-[#68686D]">This older sale cannot continue in the simplified checkout.</p>
+            <p className="mx-auto mt-2 max-w-sm text-sm leading-6 text-[#68686D]">This older sale cannot continue in the one-device sale flow.</p>
             <form action={cancelSaleAction} className="mt-6">
               <input type="hidden" name="saleId" value={selectedSale.id} />
-              <input type="hidden" name="reason" value="restarted from simplified employee checkout" />
+              <input type="hidden" name="reason" value="restarted from one-device employee sale flow" />
               <button type="submit" className="h-14 w-full rounded-full bg-[#6E0728] px-8 text-base font-semibold text-white sm:w-auto">Start again</button>
             </form>
           </section>
@@ -122,7 +132,7 @@ export default async function NewSalePage({
                   <input type="hidden" name="saleItemId" value={selectedItem.id} />
                   <button type="submit" className="h-12 w-full rounded-full border border-[#D8C4CB] px-6 text-sm font-semibold text-[#6E0728] sm:w-auto">Change device</button>
                 </form>
-                {selectedItemReady ? <Link href={employeeSaleStepHref("customer", selectedSale.id)} className="inline-flex h-14 items-center justify-center rounded-full bg-[#6E0728] px-8 text-base font-semibold text-white">Continue</Link> : null}
+                {selectedItemReady ? <Link href={employeeSaleStepHref("payment", selectedSale.id)} className="inline-flex h-14 items-center justify-center rounded-full bg-[#6E0728] px-8 text-base font-semibold text-white">Continue to payment</Link> : null}
               </div>
             </section>
             <form action={cancelSaleAction} className="text-center">

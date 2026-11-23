@@ -1,4 +1,4 @@
-export type EmployeeSaleStep = "imei" | "customer" | "review" | "status"
+export type EmployeeSaleStep = "imei" | "payment" | "customer" | "complete"
 
 type InventoryImeiRecord = {
   imei: string
@@ -6,9 +6,9 @@ type InventoryImeiRecord = {
 
 const saleStepPaths: Record<EmployeeSaleStep, string> = {
   imei: "/new-sale",
+  payment: "/new-sale/payment",
   customer: "/new-sale/customer-info",
-  review: "/new-sale/checkout",
-  status: "/new-sale/complete",
+  complete: "/new-sale/complete",
 }
 
 export function employeeSaleStepHref(step: EmployeeSaleStep, saleId?: string) {
@@ -16,9 +16,14 @@ export function employeeSaleStepHref(step: EmployeeSaleStep, saleId?: string) {
   return saleId ? `${path}?sale=${encodeURIComponent(saleId)}` : path
 }
 
-export function employeeSaleResumeStep(activeItemCount: number, hasCustomer: boolean): EmployeeSaleStep {
+export function employeeSaleResumeStep(
+  activeItemCount: number,
+  hasConfirmedPayment: boolean,
+  hasCustomer: boolean
+): EmployeeSaleStep {
   if (activeItemCount !== 1) return "imei"
-  return hasCustomer ? "review" : "customer"
+  if (!hasConfirmedPayment) return "payment"
+  return hasCustomer ? "complete" : "customer"
 }
 
 export function normalizeImeiEntry(value: string) {

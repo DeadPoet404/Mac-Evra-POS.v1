@@ -1,5 +1,8 @@
-export const saleStatuses = ["draft", "awaiting_payment", "cancelled"] as const
+export const saleStatuses = ["draft", "awaiting_payment", "completed", "cancelled"] as const
 export type SaleStatus = (typeof saleStatuses)[number]
+
+export const paymentMethods = ["mobile_money", "cash", "bank_transfer"] as const
+export type PaymentMethod = (typeof paymentMethods)[number]
 
 export type CustomerInput = {
   fullName: string
@@ -60,12 +63,26 @@ export function normalizeCustomerInput(input: CustomerInput): CustomerInput {
   return { fullName, phone, email, notes }
 }
 
+export function parsePaymentMethod(value: FormDataEntryValue | string | null | undefined): PaymentMethod {
+  if (typeof value !== "string" || !paymentMethods.includes(value as PaymentMethod)) {
+    throw new Error("Select a supported payment method.")
+  }
+  return value as PaymentMethod
+}
+
+export function paymentMethodLabel(method: PaymentMethod) {
+  if (method === "mobile_money") return "Mobile Money"
+  if (method === "bank_transfer") return "Bank transfer"
+  return "Cash"
+}
+
 export function saleStatusLabel(status: SaleStatus) {
   if (status === "awaiting_payment") return "Awaiting payment"
   return status[0].toUpperCase() + status.slice(1)
 }
 
 export type SaleCompletionPresentation = {
+  isSuccess: boolean
   eyebrow: string
   title: string
   description: string
@@ -78,54 +95,89 @@ export type SaleCompletionPresentation = {
 
 export function saleCompletionPresentation(
   status: SaleStatus,
-  saleId: string
+  saleId: string,
+  hasConfirmedPayment: boolean
 ): SaleCompletionPresentation {
   const draftHref = `/new-sale?sale=${encodeURIComponent(saleId)}`
+  const paymentHref = `/new-sale/payment?sale=${encodeURIComponent(saleId)}`
 
-  if (status === "draft") {
+  if (status === "completed" && hasConfirmedPayment) {
     return {
-      eyebrow: "Draft · work in progress",
-      title: "This sale is still a draft.",
-      description: "It has not moved to payment review. Return to the draft to review its items, customer, and reservations.",
-      amountLabel: "Current draft total",
-      noticeTitle: "Not awaiting payment.",
-      notice: "This draft must be reviewed and explicitly moved to awaiting payment before any payment workflow can begin.",
-      actionLabel: "Return to draft",
-      actionHref: draftHref,
+      isSuccess: true,
+      eyebrow: "Completed · payment recorded",
+      title: "Sale complete.",
+      description: "The full payment and completed sale are persisted. The reservation is fulfilled and the device is recorded as sold.",
+      amountLabel: "Amount received",
+      noticeTitle: "Payment recorded.",
+      notice: "This is a manual employee confirmation that the full amount was received; any reference is metadata only.",
+      actionLabel: "Start another sale",
+      actionHref: "/new-sale",
     }
   }
 
-  if (status === "cancelled") {
+  if (status === "draft") {
     return {
-      eyebrow: "Cancelled · reservations released",
-      title: "This sale was cancelled.",
-      description: "No payment is pending. Active inventory reservations were released during cancellation where applicable, and no inventory was marked sold.",
-      amountLabel: "Total when cancelled",
-      noticeTitle: "Sale cancelled.",
-      notice: "Its active reservations were released where applicable. The devices were not sold or fulfilled.",
-      actionLabel: "Return to sales",
-      actionHref: "/new-sale",
+      isSuccess: false,
+      eyebrow: "Draft · not paid",
+      title: "This sale is not complete.",
+      description: "No completed payment is persisted for this draft.",
+      amountLabel: "Current draft total",
+      noticeTitle: "Do not hand over the device.",
+      notice: "Return to the sale and confirm payment only after the full amount has actually been received.",
+      actionLabel: "Return to sale",
+      actionHref: draftHref,
     }
   }
 
   if (status === "awaiting_payment") {
     return {
-      eyebrow: "Not paid · not fulfilled",
-      title: "Awaiting verified payment.",
-      description: "The sale is saved, but no payment has been recorded and the device has not been marked sold.",
-      amountLabel: "Amount awaiting verification",
+      isSuccess: false,
+      eyebrow: "Awaiting payment · not completed",
+      title: "This sale is not complete.",
+      description: "No completed payment is persisted for this sale.",
+      amountLabel: "Amount due",
       noticeTitle: "Do not hand over the device.",
-      notice: "Payment must be verified before fulfilment.",
+      notice: "Record payment only after the full amount has actually been received.",
+      actionLabel: "Return to payment",
+      actionHref: paymentHref,
+    }
+  }
+
+  if (status === "cancelled") {
+    return {
+      isSuccess: false,
+      eyebrow: "Cancelled · reservations released",
+      title: "This sale was cancelled.",
+      description: "No successful completion is recorded. Active inventory reservations were released where applicable.",
+      amountLabel: "Total when cancelled",
+      noticeTitle: "Sale cancelled.",
+      notice: "The device was not sold or fulfilled by this sale.",
       actionLabel: "Return to sales",
       actionHref: "/new-sale",
     }
   }
 
-  throw new Error(`Unsupported sale completion status: ${status satisfies never}`)
+  return {
+    isSuccess: false,
+    eyebrow: "Completion unavailable",
+    title: "This sale is not complete.",
+    description: "The sale does not have a matching persisted payment confirmation.",
+    amountLabel: "Sale total",
+    noticeTitle: "Do not hand over the device.",
+    notice: "A completed status without its authorised payment record is not accepted as proof of payment.",
+    actionLabel: "Return to sales",
+    actionHref: "/new-sale",
+  }
 }
 
 export async function resolveSaleCompletion<
-  T extends { id: string; status: SaleStatus },
+  T extends {
+    id: string
+    status: SaleStatus
+    totalPesewas: number
+    completedAt: string | null
+    payment?: { status: string; amountPesewas: number; currency: string } | null
+  },
 >(
   saleId: string | undefined,
   loadSale: (saleId: string) => Promise<T | null>
@@ -135,7 +187,16 @@ export async function resolveSaleCompletion<
   if (!sale) return null
   return {
     sale,
-    presentation: saleCompletionPresentation(sale.status, sale.id),
+    presentation: saleCompletionPresentation(
+      sale.status,
+      sale.id,
+      Boolean(
+        sale.completedAt &&
+        sale.payment?.status === "confirmed" &&
+        sale.payment.currency === "GHS" &&
+        sale.payment.amountPesewas === sale.totalPesewas
+      )
+    ),
   }
 }
 
