@@ -2,6 +2,8 @@
 
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+
+import { signOutAction } from "@/app/auth/actions"
 import {
   Apple,
   Bell,
@@ -65,9 +67,21 @@ function pageName(pathname: string) {
   return "Manager"
 }
 
-export function ManagerShell({ children }: { children: React.ReactNode }) {
+export function ManagerShell({
+  children,
+  account,
+}: {
+  children: React.ReactNode
+  account: { displayName: string; roleName: string; storeName: string }
+}) {
   const pathname = usePathname()
   const currentPage = pageName(pathname)
+  const initials = account.displayName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0]?.toUpperCase())
+    .join("") || "ME"
 
   return (
     <div className="manager-theme min-h-screen bg-[#F7F7F8] text-[#1D1D1F]">
@@ -146,22 +160,24 @@ export function ManagerShell({ children }: { children: React.ReactNode }) {
             <DropdownMenu>
               <DropdownMenuTrigger className="flex w-full items-center gap-3 rounded-xl p-2 text-left outline-none hover:bg-[#F7F7F8] focus-visible:ring-2 focus-visible:ring-[#6E0728]/30">
                 <Avatar className="size-9 shrink-0">
-                  <AvatarFallback className="bg-[#F1E8EC] text-xs font-semibold text-[#6E0728]">AM</AvatarFallback>
+                  <AvatarFallback className="bg-[#F1E8EC] text-xs font-semibold text-[#6E0728]">{initials}</AvatarFallback>
                 </Avatar>
                 <span className="min-w-0 flex-1 group-data-[collapsible=icon]:hidden">
-                  <span className="block truncate text-sm font-medium">Alex Morgan</span>
-                  <span className="block truncate text-xs text-[#86868B]">Manager</span>
+                  <span className="block truncate text-sm font-medium">{account.displayName}</span>
+                  <span className="block truncate text-xs text-[#86868B]">{account.roleName}</span>
                 </span>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="end" side="top" className="w-56">
-                <DropdownMenuLabel>Alex Morgan</DropdownMenuLabel>
+                <DropdownMenuLabel>{account.displayName}</DropdownMenuLabel>
                 <DropdownMenuSeparator />
                 <DropdownMenuItem render={<Link href="/manager/settings" />}>
                   <Settings /> Account settings
                 </DropdownMenuItem>
-                <DropdownMenuItem render={<Link href="/" />}>
-                  <LogOut /> Sign out of preview
-                </DropdownMenuItem>
+                <form action={signOutAction}>
+                  <DropdownMenuItem render={<button type="submit" className="w-full" />}>
+                    <LogOut /> Sign out
+                  </DropdownMenuItem>
+                </form>
               </DropdownMenuContent>
             </DropdownMenu>
           </SidebarFooter>
@@ -173,7 +189,7 @@ export function ManagerShell({ children }: { children: React.ReactNode }) {
               <SidebarTrigger className="shrink-0" />
               <Separator orientation="vertical" className="h-5" />
               <div className="min-w-0">
-                <p className="truncate text-xs text-[#86868B]">Mac Evra · Accra store</p>
+                <p className="truncate text-xs text-[#86868B]">Mac Evra · {account.storeName}</p>
                 <p className="truncate text-sm font-medium text-[#1D1D1F]">{currentPage}</p>
               </div>
             </div>
@@ -186,7 +202,7 @@ export function ManagerShell({ children }: { children: React.ReactNode }) {
                 <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-[#6E0728]" />
               </Button>
               <Avatar className="hidden size-8 sm:flex">
-                <AvatarFallback className="bg-[#F1E8EC] text-xs font-semibold text-[#6E0728]">AM</AvatarFallback>
+                <AvatarFallback className="bg-[#F1E8EC] text-xs font-semibold text-[#6E0728]">{initials}</AvatarFallback>
               </Avatar>
             </div>
           </header>

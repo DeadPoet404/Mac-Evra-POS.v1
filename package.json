@@ -11,12 +11,14 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
+    "test": "node --test tests/*.test.mjs",
     "supabase:start": "supabase start",
     "supabase:stop": "supabase stop",
     "db:reset": "supabase db reset",
     "db:lint": "supabase db lint",
     "db:test": "supabase test db",
-    "db:test:inventory-concurrency": "node --env-file-if-exists=.env.local scripts/test-inventory-concurrency.mjs"
+    "db:test:inventory-concurrency": "node --env-file-if-exists=.env.local scripts/test-inventory-concurrency.mjs",
+    "db:test:auth-sessions": "node --env-file-if-exists=.env.local scripts/test-auth-sessions.mjs"
   },
   "dependencies": {
     "@base-ui/react": "^1.9.0",

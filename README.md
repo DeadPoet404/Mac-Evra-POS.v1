@@ -4,17 +4,17 @@ Mac Evra POS is an employee-assisted iPhone retail point-of-sale interface for a
 
 ## Current status
 
-The employee sale flow and manager workspace remain a frontend demonstration. Phase 1 provides Supabase configuration, SSR clients, session-cookie refresh, foundational identity/RBAC tables, explicit Row Level Security policies, a safe development store seed, and pgTAP policy tests.
+The employee sale flow and manager workspace remain demonstration interfaces. Phase 1 provides the Supabase identity/RBAC foundation, and Phase 2 provides persistent physical inventory, append-only history, and atomic reservation RPCs. Both reviewed migrations are merged and applied to the hosted project.
 
-The Phase 1 migration has been applied to the hosted project. Phase 2 now prepares persistent inventory, append-only inventory history, and atomic reservation RPCs for review; the Phase 2 migration has **not** been applied remotely. Sales, payments, customers, trade-ins, refunds, receipts, and reports remain demonstration data and are outside Phase 2.
+Phase 3 adds real email/password sign-in, sign-out, SSR session validation, protected employee routes, store-scoped manager permission enforcement, and a review-only invitation/acceptance migration. Roles and permissions are always resolved from database records through the authenticated session; the application never trusts client-supplied role values. The Phase 3 migration has **not** been applied remotely, and no hosted Auth settings, users, stores, or memberships were changed.
 
-Shared demonstration devices remain centralised in `src/lib/inventory.ts` so the unsigned frontend stays functional. Secure server-only inventory functions are ready in `src/lib/inventory-server.ts`, but the UI is intentionally not connected until an approved employee sign-in flow exists. The selected demo device, customer, and payment are still handed between sale pages with `sessionStorage`; this does not reserve or sell inventory.
+Shared demonstration devices remain centralised in `src/lib/inventory.ts`. Secure server-only inventory functions remain intentionally disconnected from the UI in this phase. The selected demo device, customer, and payment are still handed between sale pages with `sessionStorage`; this does not reserve or sell inventory. Sales, payments, customers, trade-ins, refunds, receipts, and reports remain demonstration data.
 
 ### Employee routes
 
 | Route | Purpose |
 | --- | --- |
-| `/` | Sign-in preview |
+| `/` | Employee email/password sign-in |
 | `/home` | Employee home and workflow navigation |
 | `/inventory` | Search and filter IMEI-level demonstration inventory |
 | `/trade-in` | Six-step trade-in and replacement-device preview |
@@ -45,24 +45,29 @@ The hosted project inspected for this repository is:
 - Region: `eu-west-1`
 - PostgreSQL: 17
 
-It was an empty, healthy Supabase project when first inspected: no application tables, Auth users, Storage buckets, Edge Functions, or user-created migrations existed. The reviewed Phase 1 migration was later applied; hosted Auth settings remain unchanged, and Phase 2 remains review-only.
+It was an empty, healthy Supabase project when first inspected. The reviewed Phase 1 and Phase 2 migrations were later applied. Hosted Auth settings remain unchanged, with zero users and no custom SMTP; Phase 3 remains review-only.
 
 Backend files:
 
 - `supabase/config.toml` — local Supabase configuration aligned to PostgreSQL 17
 - `supabase/migrations/20261123060000_phase_01_foundation.sql` — stores, profiles, RBAC, memberships, invitations, audit foundation, grants, and RLS
-- `supabase/migrations/20261123120000_phase_02_inventory.sql` — persistent physical inventory, history, reservation lifecycle, atomic RPCs, grants, and RLS; review-only and not applied remotely
+- `supabase/migrations/20261123120000_phase_02_inventory.sql` — applied persistent physical inventory, history, reservation lifecycle, atomic RPCs, grants, and RLS
+- `supabase/migrations/20261123180000_phase_03_employee_auth.sql` — review-only invitation preparation and acceptance functions; not applied remotely
 - `supabase/seed.sql` — one clearly labelled local development store; no users, credentials, inventory, or financial records
 - `supabase/tests/001_foundation_rls.test.sql` — pgTAP foundation policy tests
-- `supabase/tests/002_inventory_reservations.test.sql` — pgTAP inventory integrity, isolation, permission, reservation, expiry, release, and history tests
+- `supabase/tests/002_inventory_reservations.test.sql` — pgTAP inventory integrity and reservation tests
+- `supabase/tests/003_employee_auth.test.sql` — pgTAP invitation, role-assignment, suspension, and anonymous-access tests
 - `scripts/test-inventory-concurrency.mjs` — local-only two-client reservation contention test
-- `.github/workflows/phase-2-validation.yml` — Node 24 application checks and disposable local Supabase database validation
+- `scripts/test-auth-sessions.mjs` — local-only email/password and separate-session access test
+- `.github/workflows/validation.yml` — Node 24 application checks and disposable local Supabase database validation
+- `src/lib/auth/` — trusted access resolution, route policy, and server-only staff provisioning
 - `src/lib/supabase/client.ts` — browser client
 - `src/lib/supabase/server.ts` — cookie-aware Server Component/server-action client
+- `src/lib/supabase/admin.ts` — server-only Auth Admin client
 - `src/lib/inventory-server.ts` — authenticated server-only inventory reads and reservation RPC wrappers
-- `src/lib/supabase/proxy.ts` and `src/proxy.ts` — Next.js 16 session refresh
+- `src/lib/supabase/proxy.ts` and `src/proxy.ts` — Next.js 16 session refresh and route enforcement
 
-See `docs/supabase-foundation.md` for Phase 1 and `docs/inventory-phase-2.md` for the Phase 2 schema, lifecycle, security, and integration boundary.
+See `docs/supabase-foundation.md`, `docs/inventory-phase-2.md`, and `docs/employee-auth-phase-3.md` for the security and operational boundaries of each phase.
 
 ## Local setup
 
@@ -89,9 +94,11 @@ Copy the local API URL and local publishable key reported by `supabase status` i
 NEXT_PUBLIC_SUPABASE_URL=
 NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=
 SUPABASE_SERVICE_ROLE_KEY=
+APP_URL=http://localhost:3000
+STAFF_INVITATION_EMAIL_ENABLED=false
 ```
 
-`SUPABASE_SERVICE_ROLE_KEY` is server-only and is not needed by the browser or normal authenticated SSR client. Never prefix it with `NEXT_PUBLIC_`, expose it in client components, or commit its value.
+`SUPABASE_SERVICE_ROLE_KEY` is server-only and is not needed by the browser or normal authenticated SSR client. Never prefix it with `NEXT_PUBLIC_`, expose it in client components, or commit its value. Keep invitation delivery disabled until SMTP and exact redirect URLs are configured.
 
 Apply migrations and the safe local seed, then run the database tests:
 
@@ -133,27 +140,21 @@ The login flow must be completed directly through the Supabase CLI/browser. Do n
 
 ## Authentication status
 
-The hosted project currently has email Auth enabled and phone Auth disabled. Google and Apple providers are disabled, while the existing sign-in design presents Google and Apple buttons. Phase 1 therefore does not invent a password or magic-link screen and does not connect those buttons to a disabled provider.
+Email/password sign-in and sign-out are implemented. Next.js Proxy validates Auth tokens, protected server layouts enforce effective store permissions, and suspended profiles or memberships fail closed. The application has no public registration endpoint or UI.
 
-The session proxy and SSR clients are ready, but protected-route redirects are intentionally deferred until an approved sign-in provider is configured. Before production onboarding:
-
-1. Disable public signup and retain invite-only staff onboarding.
-2. Select and configure an authentication method that fits the existing sign-in interface.
-3. Configure reviewed site and redirect URLs for each environment.
-4. Apply manager/administrator MFA requirements.
-5. Add trusted invitation and membership-management server operations.
-
-No hosted Auth setting was changed in Phase 1.
+Hosted onboarding is still blocked: email confirmation is required, no custom SMTP is configured, the site URL remains localhost, the redirect allow-list is empty, public signup remains enabled at provider level, and there is no production store or first administrator. No hosted Auth setting was changed in Phase 3. See `docs/employee-auth-phase-3.md` for the reviewed sequence required before enabling invitation delivery.
 
 ## Quality checks
 
 ```bash
+npm test
 npm run lint
 npm run typecheck
 npm run build
 npm run db:lint
 npm run db:test
 npm run db:test:inventory-concurrency
+npm run db:test:auth-sessions
 ```
 
 The database commands require the local Supabase Docker stack. The concurrency test refuses non-local Supabase URLs and creates disposable local Auth/inventory fixtures; reset the local database afterwards. The app uses a system font stack, so production builds do not depend on downloading a Google font.
@@ -161,6 +162,8 @@ The database commands require the local Supabase Docker stack. The concurrency t
 ## Security boundaries
 
 - The browser receives only the Supabase URL and publishable key.
+- Email/password credentials are submitted to a server action and authentication errors do not disclose account existence.
+- Proxy and protected server layouts deny anonymous routes and resolve permissions from trusted database records.
 - RLS and table privileges deny anonymous application-table access.
 - Employees can read their own profile and membership plus their active store.
 - Managers receive store-scoped employee-access and audit visibility through permissions.
@@ -171,8 +174,9 @@ The database commands require the local Supabase Docker stack. The concurrency t
 - Physical-device IMEIs are globally unique and must pass 15-digit Luhn validation.
 - Inventory reservation, release, and expiry are transactional RPCs that recheck membership and permissions.
 - Normal employees cannot read acquisition cost or write inventory tables directly.
-- Service-role access is reserved for trusted server operations and is never used by browser code.
-- Persistent inventory is prepared but not connected to the unsigned demonstration UI; no sale, payment, or financial state is authoritative yet.
+- Service-role Auth Admin access is isolated in a `server-only` module and is never used by browser code.
+- Staff invitation preparation and acceptance derive actor identity from the authenticated session and never accept caller-supplied actor IDs.
+- Persistent inventory remains disconnected from the demonstration workflows; no sale, payment, or financial state is authoritative yet.
 
 ## Important production blockers
 

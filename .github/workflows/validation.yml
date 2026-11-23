@@ -1,18 +1,15 @@
-name: Phase 2 validation
+name: Application and database validation
 
 on:
   pull_request:
   push:
-    branches:
-      - main
-      - arena/77b806d4-mac-evra-pos-v1
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: phase-2-validation-${{ github.workflow }}-${{ github.ref }}
+  group: validation-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -33,6 +30,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Test authentication policy
+        run: npm test
 
       - name: Lint
         run: npm run lint
@@ -94,11 +94,14 @@ jobs:
       - name: Lint database schema
         run: npm run db:lint
 
-      - name: Run Phase 1 and Phase 2 pgTAP suites
+      - name: Run Phase 1, Phase 2, and Phase 3 pgTAP suites
         run: npm run db:test
 
       - name: Run authenticated inventory concurrency tests
         run: npm run db:test:inventory-concurrency
+
+      - name: Run authenticated session integration tests
+        run: npm run db:test:auth-sessions
 
       - name: Stop and remove local Supabase
         if: always()
