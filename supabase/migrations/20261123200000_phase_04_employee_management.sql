@@ -52,7 +52,7 @@ begin
     and private.has_store_permission(membership.store_id, 'manage_employee_access')
   order by membership.created_at
   limit 1
-  for share of membership, profile, store_record;
+  for share of membership, profile;
 
   if caller_membership_id is null then
     raise exception using errcode = '42501', message = 'active employee access management permission required';
