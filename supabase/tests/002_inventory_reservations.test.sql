@@ -50,8 +50,8 @@ values
 
 insert into public.device_models (id, model_name, storage_gb)
 values
-  ('31000000-0000-4000-8000-000000000001', 'iPhone 15 Pro', 256),
-  ('31000000-0000-4000-8000-000000000002', 'iPhone 14', 128);
+  ('31000000-0000-4000-8000-000000000001', 'Inventory Fixture iPhone 15 Pro', 256),
+  ('31000000-0000-4000-8000-000000000002', 'Inventory Fixture iPhone 14', 128);
 
 insert into public.inventory_devices (
   id,

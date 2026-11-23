@@ -28,6 +28,7 @@ import type { OpeningStockInvoice } from "@/lib/opening-stock-server"
 import { loadOpeningStockDashboard } from "@/lib/opening-stock-server"
 import { formatPesewas, pesewasToGhsInput } from "@/lib/sales"
 import { BatchReceivingForm } from "./batch-receiving-form"
+import { ModelSelector } from "./model-selector"
 import {
   activateOpeningStockUnitAction,
   addSupplierInvoiceLineAction,
@@ -241,11 +242,11 @@ export default async function OpeningStockPage({
             <FormSection title="3 · Add an invoice line" description="Purchase cost is stored in integer pesewas; each line total is calculated from quantity × unit cost.">
               <form action={addSupplierInvoiceLineAction} className="grid gap-3 sm:grid-cols-2">
                 <label className={labelClass}><span>Invoice</span><select name="invoiceId" required disabled={!dashboard.invoices.length} className={inputClass}>{dashboard.invoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoiceLabel(invoice)}</option>)}</select></label>
-                <label className={labelClass}><span>Registered model</span><select name="modelCatalogueId" required disabled={!dashboard.models.length} className={inputClass}>{dashboard.models.map((model) => <option key={model.id} value={model.id}>{model.modelName} · {model.storageGb}GB</option>)}</select></label>
+                <label className={labelClass}><span>Registered model</span><ModelSelector deviceModels={dashboard.deviceModels} inputClass={inputClass} /></label>
                 <label className={labelClass}><span>Quantity invoiced</span><input name="quantityInvoiced" required type="number" min={1} max={1000} defaultValue={1} className={inputClass} /></label>
                 <label className={labelClass}><span>Unit purchase cost · GH₵</span><input name="unitCostGhs" required inputMode="decimal" placeholder="0.00" className={inputClass} /></label>
                 <label className={`${labelClass} sm:col-span-2`}><span>Line notes · optional</span><input name="notes" maxLength={1000} className={inputClass} /></label>
-                <Button type="submit" disabled={!dashboard.invoices.length || !dashboard.models.length} className={`${buttonClass} sm:col-span-2`}>Add invoice line</Button>
+                <Button type="submit" disabled={!dashboard.invoices.length || !dashboard.deviceModels.length} className={`${buttonClass} sm:col-span-2`}>Add invoice line</Button>
               </form>
             </FormSection>
           </CardContent>
@@ -442,7 +443,8 @@ export default async function OpeningStockPage({
                 : "Purchase cost and calculated totals are restricted for this membership. The database returns null through permission-checked views."}
             </p>
             <div className="rounded-xl bg-[#FAFAFB] p-4 text-xs leading-6 text-[#424245]">
-              <p><span className="font-semibold">Models:</span> {dashboard.models.length}</p>
+              <p><span className="font-semibold">Store models:</span> {dashboard.models.length}</p>
+              <p><span className="font-semibold">Catalogue variants:</span> {dashboard.deviceModels.length}</p>
               <p><span className="font-semibold">Invoices:</span> {dashboard.invoices.length}</p>
               <p><span className="font-semibold">Staged units:</span> {stagedUnits.length}</p>
               <p><span className="font-semibold">Activated units:</span> {activatedUnits.length}</p>

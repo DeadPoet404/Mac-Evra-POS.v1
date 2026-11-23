@@ -104,11 +104,42 @@ export async function confirmSupplierInvoiceAction(formData: FormData): Promise<
 
 export async function addSupplierInvoiceLineAction(formData: FormData): Promise<void> {
   const input = parseOrRedirect(() => parseInvoiceLineInput(formData))
+  const rawDeviceModelId = formData.get("deviceModelId")
+  const deviceModelId = typeof rawDeviceModelId === "string" && rawDeviceModelId.trim() ? rawDeviceModelId.trim() : null
+
+  let resolvedCatalogueId = input.modelCatalogueId
+  if (deviceModelId && resolvedCatalogueId === deviceModelId) {
+    const membership = await requirePermissions(["access_manager_workspace", "manage_inventory"])
+    const supabase = await createClient()
+    const { data: modelRow, error: modelError } = await supabase
+      .from("device_models")
+      .select("model_name, storage_gb")
+      .eq("id", deviceModelId)
+      .maybeSingle()
+
+    if (modelError || !modelRow) {
+      redirect(`${route}?error=${encodeURIComponent("Selected device model was not found.")}`)
+    }
+
+    const { data: regData, error: regError } = await supabase.rpc("register_opening_stock_model", {
+      p_store_id: parseUuid(membership.membership.storeId, "store"),
+      p_model_name: modelRow.model_name,
+      p_storage_gb: modelRow.storage_gb,
+      p_supplier_sku: null,
+    })
+
+    const registeredId = Array.isArray(regData) ? regData[0]?.model_catalogue_id : null
+    if (regError || typeof registeredId !== "string" || !registeredId) {
+      redirect(`${route}?error=${encodeURIComponent(regError?.message || "Could not prepare selected device model for this store.")}`)
+    }
+    resolvedCatalogueId = registeredId
+  }
+
   await callOpeningStockRpc(
     "add_supplier_invoice_line",
     {
       p_invoice_id: input.invoiceId,
-      p_model_catalogue_id: input.modelCatalogueId,
+      p_model_catalogue_id: resolvedCatalogueId,
       p_quantity_invoiced: input.quantityInvoiced,
       p_unit_cost_pesewas: input.unitCostPesewas,
       p_notes: input.notes,
