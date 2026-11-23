@@ -1207,6 +1207,7 @@ revoke all on function private.can_view_sale(uuid) from public;
 revoke all on function private.recalculate_sale_totals(uuid) from public;
 
 grant execute on function private.normalize_customer_phone(text) to service_role;
+grant execute on function private.can_view_sale(uuid) to authenticated;
 
 alter table public.customers enable row level security;
 alter table public.customers force row level security;
