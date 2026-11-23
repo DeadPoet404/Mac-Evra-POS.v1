@@ -4,11 +4,11 @@ Mac Evra POS is an employee-assisted iPhone retail point-of-sale interface for a
 
 ## Current status
 
-The employee sale flow and manager workspace remain demonstration interfaces. Phase 1 provides the Supabase identity/RBAC foundation, and Phase 2 provides persistent physical inventory, append-only history, and atomic reservation RPCs. Both reviewed migrations are merged and applied to the hosted project.
+Phases 1–4 provide the Supabase identity/RBAC foundation, persistent physical inventory and reservations, authenticated employee access, secure invitations, and audited employee management.
 
-Phase 3 adds real email/password sign-in, sign-out, SSR session validation, protected employee routes, store-scoped manager permission enforcement, and a review-only invitation/acceptance migration. Roles and permissions are always resolved from database records through the authenticated session; the application never trusts client-supplied role values. The Phase 3 migration has **not** been applied remotely, and no hosted Auth settings, users, stores, or memberships were changed.
+Phase 5 adds persistent store-scoped customers, employee-owned sale drafts, immutable IMEI-level sale-item snapshots, trusted integer-pesewa totals, reservation-backed draft editing/cancellation, and a real manager sale register. The browser never supplies authoritative prices, totals, stores, actors, or permissions. The Phase 5 migration is prepared for review and has **not** been applied to hosted Supabase.
 
-Shared demonstration devices remain centralised in `src/lib/inventory.ts`. Secure server-only inventory functions remain intentionally disconnected from the UI in this phase. The selected demo device, customer, and payment are still handed between sale pages with `sessionStorage`; this does not reserve or sell inventory. Sales, payments, customers, trade-ins, refunds, receipts, and reports remain demonstration data.
+Payments remain deliberately unimplemented. A Phase 5 sale can only be `draft`, `awaiting_payment`, or `cancelled`; it cannot be paid or completed, and checkout never marks inventory sold. Trade-ins, refunds, receipts, payment reconciliation, and aggregate reporting remain later-phase or demonstration functionality.
 
 ### Employee routes
 
@@ -16,20 +16,20 @@ Shared demonstration devices remain centralised in `src/lib/inventory.ts`. Secur
 | --- | --- |
 | `/` | Employee email/password sign-in |
 | `/home` | Employee home and workflow navigation |
-| `/inventory` | Search and filter IMEI-level demonstration inventory |
+| `/inventory` | Search real RLS-scoped IMEI-level inventory |
 | `/trade-in` | Six-step trade-in and replacement-device preview |
-| `/new-sale` | Find or scan a demonstration device |
-| `/new-sale/payment` | Record an explicitly unverified demo payment |
-| `/new-sale/customer-info` | Collect preview customer details |
-| `/new-sale/checkout` | Review the preview sale |
-| `/new-sale/complete` | Preview completion state |
+| `/new-sale` | Create, save, resume, edit, expire, and cancel persistent sale drafts |
+| `/new-sale/customer-info` | Search, select, create, or clear a persistent customer |
+| `/new-sale/checkout` | Review trusted totals and submit only to awaiting payment |
+| `/new-sale/payment` | Explicit Phase 6 boundary; accepts no payment input |
+| `/new-sale/complete` | Awaiting-payment status with no paid/completed claim |
 
 ### Manager routes
 
 | Route | Purpose |
 | --- | --- |
 | `/manager` | Store overview and attention queue |
-| `/manager/sales` | Demonstration transactions and payment status |
+| `/manager/sales` | Real store-scoped sale drafts, items, customers, totals, and employee attribution |
 | `/manager/inventory` | Demonstration IMEI-level register |
 | `/manager/employees` | Preview profiles, roles, and permissions |
 | `/manager/approvals` | Preview sensitive-action requests |
@@ -45,19 +45,24 @@ The hosted project inspected for this repository is:
 - Region: `eu-west-1`
 - PostgreSQL: 17
 
-It was an empty, healthy Supabase project when first inspected. The reviewed Phase 1 and Phase 2 migrations were later applied. Hosted Auth settings remain unchanged, with zero users and no custom SMTP; Phase 3 remains review-only.
+It was an empty, healthy Supabase project when first inspected. Later read-only verification found Phases 1–3 recorded, custom SMTP configured, and an intentional first-administrator bootstrap. Phase 4 and Phase 5 hosted migration state must be checked with `supabase migration list --linked` before any owner-approved push; this implementation did not change hosted state.
 
 Backend files:
 
 - `supabase/config.toml` — local Supabase configuration aligned to PostgreSQL 17
 - `supabase/migrations/20261123060000_phase_01_foundation.sql` — stores, profiles, RBAC, memberships, invitations, audit foundation, grants, and RLS
 - `supabase/migrations/20261123120000_phase_02_inventory.sql` — applied persistent physical inventory, history, reservation lifecycle, atomic RPCs, grants, and RLS
-- `supabase/migrations/20261123180000_phase_03_employee_auth.sql` — review-only invitation preparation and acceptance functions; not applied remotely
-- `supabase/seed.sql` — one clearly labelled local development store; no users, credentials, inventory, or financial records
+- `supabase/migrations/20261123180000_phase_03_employee_auth.sql` — invitation preparation and acceptance functions
+- `supabase/migrations/20261123200000_phase_04_employee_management.sql` — audited store membership management
+- `supabase/migrations/20261123220000_phase_05_sales_customers.sql` — review-only persistent customers, sale drafts, item snapshots, secure RPCs, grants, and RLS; not applied remotely
+- `supabase/seed.sql` — one clearly labelled local development store; no users, credentials, inventory, customers, sales, or financial records
 - `supabase/tests/001_foundation_rls.test.sql` — pgTAP foundation policy tests
 - `supabase/tests/002_inventory_reservations.test.sql` — pgTAP inventory integrity and reservation tests
 - `supabase/tests/003_employee_auth.test.sql` — pgTAP invitation, role-assignment, suspension, and anonymous-access tests
+- `supabase/tests/004_employee_management.test.sql` — pgTAP employee access-management tests
+- `supabase/tests/005_sales_customers.test.sql` — pgTAP customer, sale, reservation, isolation, total, discount, cancellation, and audit tests
 - `scripts/test-inventory-concurrency.mjs` — local-only two-client reservation contention test
+- `scripts/test-sales-concurrency.mjs` — local-only competing sale-draft reservation/item test
 - `scripts/test-auth-concurrency.mjs` — deterministic local invitation-acceptance versus profile-suspension lock test
 - `scripts/test-auth-sessions.mjs` — local-only email/password, actual captured invitation email, SSR confirmation, password setup, existing-account, and separate-session access test
 - `supabase/templates/` — direct invite and magic-link templates that preserve the complete invitation-specific confirmation parameters
@@ -69,7 +74,7 @@ Backend files:
 - `src/lib/inventory-server.ts` — authenticated server-only inventory reads and reservation RPC wrappers
 - `src/lib/supabase/proxy.ts` and `src/proxy.ts` — Next.js 16 session refresh and route enforcement
 
-See `docs/supabase-foundation.md`, `docs/inventory-phase-2.md`, and `docs/employee-auth-phase-3.md` for the security and operational boundaries of each phase.
+See `docs/supabase-foundation.md`, `docs/inventory-phase-2.md`, `docs/employee-auth-phase-3.md`, and `docs/sales-phase-5.md` for security, transaction, deployment, and operational boundaries.
 
 ## Local setup
 
@@ -144,7 +149,7 @@ The login flow must be completed directly through the Supabase CLI/browser. Do n
 
 Email/password sign-in and sign-out are implemented. Next.js Proxy validates Auth tokens, protected server layouts enforce effective store permissions, and suspended profiles or memberships fail closed. The application has no public registration endpoint or UI.
 
-Hosted onboarding is still blocked: email confirmation is required, no custom SMTP is configured, the site URL remains localhost, the redirect allow-list is empty, public signup remains enabled at provider level, and there is no production store or first administrator. No hosted Auth setting was changed in Phase 3. See `docs/employee-auth-phase-3.md` for the reviewed sequence required before enabling invitation delivery.
+The latest read-only hosted verification found a valid first administrator and custom SMTP, but the site URL and redirect allow-list remained localhost-only and public signup remained enabled. Those Auth production-readiness issues are separate from Phase 5 and were not changed here. See `docs/employee-auth-phase-3.md` for the invitation and Auth boundaries.
 
 ## Quality checks
 
@@ -156,6 +161,7 @@ npm run build
 npm run db:lint
 npm run db:test
 npm run db:test:inventory-concurrency
+npm run db:test:sales-concurrency
 npm run db:test:auth-concurrency
 npm run db:test:auth-sessions
 ```
@@ -182,7 +188,7 @@ The database commands require the local Supabase Docker stack. The concurrency t
 - Password sign-in never consumes invitations; email confirmation accepts one invitation ID using a random database-hashed token and a verified Auth email.
 - Profile and store rows remain locked through invitation acceptance so suspension or deactivation cannot race membership creation.
 - Repeated invitation preparation rotates the acceptance token, and each preparation and provider delivery result has a separate audit event.
-- Persistent inventory remains disconnected from the demonstration workflows; no sale, payment, or financial state is authoritative yet.
+- Persistent sale drafts use trusted inventory prices and reservations; no payment, paid/completed sale, receipt, revenue, or sold-inventory state is introduced by Phase 5.
 
 ## Important production blockers
 
