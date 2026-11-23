@@ -4,11 +4,13 @@ Mac Evra POS is an employee-assisted iPhone retail point-of-sale interface for a
 
 ## Current status
 
-Phases 1–5 provide the Supabase identity/RBAC foundation, persistent physical inventory and reservations, authenticated employee access, secure invitations and employee management, persistent customers, and reservation-backed one-device sale drafts with trusted integer-pesewa totals.
+Phases 1–6 provide the Supabase identity/RBAC foundation, persistent physical inventory and reservations, authenticated employee access, secure invitations and employee management, persistent customers, reservation-backed one-device sale drafts with trusted integer-pesewa totals, and one immutable manually confirmed full payment per completed sale.
 
-Phase 6 adds one immutable, manually confirmed full payment per sale and atomic completion. The database derives the store, employee, membership, permissions, item price, total, and inventory state from trusted records; the browser supplies only the sale identifier, one supported method, optional reference metadata, and explicit receipt attestation. One transaction records payment, fulfils the reservation, marks inventory sold, appends a sold movement, completes the sale, and writes attributed audit events.
+Phase 7 replaces both trade-in previews with a persistent store-scoped workflow. Employees resume their own saved customer, device identity, structured inspection, and non-final integer-pesewa offer; managers review real submitted requests and can record one attributed approval or decline only with effective `approve_trade_ins`. Self-approval, cross-store access, direct writes, short notes, replayed decisions, and concurrent duplicate decisions fail closed.
 
-The employee route order is exactly IMEI → Payment → Customer details → Sale complete. Split/partial payments, gateways, automatic provider verification, refunds, reversals, receipts, trade-in settlement, reconciliation, and aggregate reporting remain excluded or later-phase functionality. The Phase 6 migration is prepared for review and has **not** been applied to hosted Supabase.
+Approval never changes inventory. A separate `manage_inventory`-checked physical-receipt transaction accepts only an approved, sellable, valid-IMEI request with explicit identity and condition attestations. It creates the existing device/store-inventory rows, records trade-in acquisition provenance, appends intake movement/audit history, and stores acquisition cost behind the existing restricted inventory column. Serial-only requests remain supported through approval but cannot be put into the current IMEI-only sellable inventory by inventing an IMEI.
+
+The employee sale route remains exactly IMEI → Payment → Customer details → Sale complete. Trade-ins do not alter sale totals, apply credit, record customer payment/payout, or change Phase 6 payment behavior. The Phase 7 migration is prepared for review and has **not** been applied to hosted Supabase.
 
 ### Employee routes
 
@@ -17,7 +19,7 @@ The employee route order is exactly IMEI → Payment → Customer details → Sa
 | `/` | Employee email/password sign-in |
 | `/home` | Employee home and workflow navigation |
 | `/inventory` | Search real RLS-scoped IMEI-level inventory |
-| `/trade-in` | Six-step trade-in and replacement-device preview |
+| `/trade-in` | Persist and resume customer, device identity, structured inspection, and non-final proposed offer for manager review |
 | `/new-sale` | Verify one IMEI and persist its reservation-backed sale |
 | `/new-sale/payment` | Show the trusted total and manually confirm one full payment |
 | `/new-sale/customer-info` | Capture customer details after successful payment recording |
@@ -32,7 +34,7 @@ The employee route order is exactly IMEI → Payment → Customer details → Sa
 | `/manager/sales` | Real store-scoped sale drafts, items, customers, totals, and employee attribution |
 | `/manager/inventory` | Demonstration IMEI-level register |
 | `/manager/employees` | Preview profiles, roles, and permissions |
-| `/manager/approvals` | Preview sensitive-action requests |
+| `/manager/approvals` | Real store-scoped trade-in queue, permission-checked decisions, and separate physical intake |
 | `/manager/reports` | Demonstration reporting |
 | `/manager/settings` | Preview store and POS preferences |
 
@@ -45,7 +47,7 @@ The hosted project inspected for this repository is:
 - Region: `eu-west-1`
 - PostgreSQL: 17
 
-It was an empty, healthy Supabase project when first inspected. Later read-only verification found Phases 1–3 recorded, custom SMTP configured, and an intentional first-administrator bootstrap. Phase 4–6 hosted migration state must be checked with `supabase migration list --linked` before any owner-approved push; this implementation did not change hosted state.
+It was an empty, healthy Supabase project when first inspected. Later read-only verification found Phases 1–3 recorded, custom SMTP configured, and an intentional first-administrator bootstrap. Phase 4–7 hosted migration state must be checked with `supabase migration list --linked` before any owner-approved push; this implementation did not change hosted state.
 
 Backend files:
 
@@ -55,7 +57,8 @@ Backend files:
 - `supabase/migrations/20261123180000_phase_03_employee_auth.sql` — invitation preparation and acceptance functions
 - `supabase/migrations/20261123200000_phase_04_employee_management.sql` — audited store membership management
 - `supabase/migrations/20261123220000_phase_05_sales_customers.sql` — persistent customers, sale drafts, item snapshots, secure RPCs, grants, and RLS
-- `supabase/migrations/20261123235900_phase_06_manual_payments.sql` — review-only immutable manual payments, atomic completion, grants, and forced RLS; not applied remotely
+- `supabase/migrations/20261123235900_phase_06_manual_payments.sql` — immutable manual payments, atomic completion, grants, and forced RLS
+- `supabase/migrations/20261124010000_phase_07_trade_ins.sql` — review-only persistent trade-in lifecycle, structured inspection, manager decisions, safe physical intake, provenance, grants, and forced RLS; not applied remotely
 - `supabase/seed.sql` — one clearly labelled local development store; no users, credentials, inventory, customers, sales, or financial records
 - `supabase/tests/001_foundation_rls.test.sql` — pgTAP foundation policy tests
 - `supabase/tests/002_inventory_reservations.test.sql` — pgTAP inventory integrity and reservation tests
@@ -63,9 +66,11 @@ Backend files:
 - `supabase/tests/004_employee_management.test.sql` — pgTAP employee access-management tests
 - `supabase/tests/005_sales_customers.test.sql` — pgTAP customer, sale, reservation, isolation, total, discount, cancellation, and audit tests
 - `supabase/tests/006_manual_payments.test.sql` — pgTAP manual payment, completion, isolation, fulfilment, immutability, and audit tests
+- `supabase/tests/007_trade_ins.test.sql` — pgTAP trade-in RLS, workflow, permissions, identity, decision, physical intake, rollback, provenance, immutability, and audit tests
 - `scripts/test-inventory-concurrency.mjs` — local-only two-client reservation contention test
 - `scripts/test-sales-concurrency.mjs` — local-only competing sale-draft reservation/item test
 - `scripts/test-payment-concurrency.mjs` — local-only duplicate payment-confirmation race test
+- `scripts/test-trade-in-concurrency.mjs` — local-only competing manager decision race test
 - `scripts/test-auth-concurrency.mjs` — deterministic local invitation-acceptance versus profile-suspension lock test
 - `scripts/test-auth-sessions.mjs` — local-only email/password, actual captured invitation email, SSR confirmation, password setup, existing-account, and separate-session access test
 - `supabase/templates/` — direct invite and magic-link templates that preserve the complete invitation-specific confirmation parameters
@@ -77,7 +82,7 @@ Backend files:
 - `src/lib/inventory-server.ts` — authenticated server-only inventory reads and reservation RPC wrappers
 - `src/lib/supabase/proxy.ts` and `src/proxy.ts` — Next.js 16 session refresh and route enforcement
 
-See `docs/supabase-foundation.md`, `docs/inventory-phase-2.md`, `docs/employee-auth-phase-3.md`, `docs/sales-phase-5.md`, and `docs/manual-payments-phase-6.md` for security, transaction, deployment, and operational boundaries.
+See `docs/supabase-foundation.md`, `docs/inventory-phase-2.md`, `docs/employee-auth-phase-3.md`, `docs/sales-phase-5.md`, `docs/manual-payments-phase-6.md`, and `docs/trade-ins-phase-7.md` for security, transaction, deployment, and operational boundaries.
 
 ## Local setup
 
@@ -166,6 +171,7 @@ npm run db:test
 npm run db:test:inventory-concurrency
 npm run db:test:sales-concurrency
 npm run db:test:payment-concurrency
+npm run db:test:trade-in-concurrency
 npm run db:test:auth-concurrency
 npm run db:test:auth-sessions
 ```
@@ -196,9 +202,16 @@ The database commands require the local Supabase Docker stack. The concurrency t
 - Manual payment rows are one-per-sale, forced-RLS protected, append-only, and readable only by the sale employee or an authorised same-store manager.
 - A payment reference remains optional employee-entered metadata and is never represented as provider verification.
 - The completion route queries persisted sale and payment state and rejects draft, awaiting-payment, cancelled, missing, inaccessible, and payment-less records as success.
+- Trade-in drafts and submitted snapshots are store-scoped, forced-RLS protected, and writable only through fixed-search-path authenticated RPCs.
+- Employees can read and resume only their own draft/request; reviewers cannot see other employees' drafts and cannot decide without effective `approve_trade_ins`.
+- Trade-in submission, approval, decline, and physical intake derive store, actor, membership, permissions, and timestamps from trusted context and append attributed immutable audit events.
+- Row locks serialize manager decisions and physical intake; self-approval, duplicate decisions, duplicate intake, and cross-store identifiers are rejected.
+- Approval and decline leave inventory untouched. Physical intake separately requires effective `manage_inventory`, exact identity/condition attestations, an eligible valid IMEI inspection, and one atomic provenance/movement/audit transaction.
+- Normal employees still cannot read `store_inventory.cost_pesewas`; the approved offer is copied into that restricted column only during successful physical intake.
+- Trade-ins never update sales, payments, reservations, customer payouts, or revenue.
 
 ## Important production blockers
 
-Later phases must add trusted inventory intake/adjustment commands, trade-in inspection/valuation/approval, receipts, refunds, returns, provider reconciliation, broader reporting, monitoring, backups, and end-to-end browser tests.
+Later phases must add general trusted inventory adjustment commands, receipts, refunds, returns, provider reconciliation, trade-in payout/settlement policy, broader reporting, monitoring, backups, and end-to-end browser tests. Serial-only devices cannot enter the current IMEI-required sellable inventory unless a separate reviewed inventory-identity extension is delivered; no IMEI may be fabricated.
 
-Manual payment references, UI inspection results, and preview approval decisions are not automatic third-party verification. Any provider-backed payment flow requires a separate reviewed integration and reconciliation model.
+Manual payment references and employee inspection results are not automatic third-party verification. Any provider-backed payment, deterministic valuation, customer payout, sale-credit, or blacklist/ownership service requires a separate reviewed integration and transaction model.
