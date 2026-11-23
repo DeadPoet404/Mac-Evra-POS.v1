@@ -99,7 +99,7 @@ jobs:
       - name: Lint database schema
         run: npm run db:lint
 
-      - name: Run all pgTAP database suites (Phases 1–4)
+      - name: Run all pgTAP database suites (Phases 1–5)
         shell: bash
         run: |
           set +e
@@ -119,6 +119,9 @@ jobs:
 
       - name: Run authenticated inventory concurrency tests
         run: npm run db:test:inventory-concurrency
+
+      - name: Run competing sale draft concurrency tests
+        run: npm run db:test:sales-concurrency
 
       - name: Run invitation suspension concurrency tests
         run: npm run db:test:auth-concurrency
