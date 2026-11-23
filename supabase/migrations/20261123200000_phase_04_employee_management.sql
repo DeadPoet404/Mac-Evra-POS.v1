@@ -2,6 +2,7 @@ begin;
 
 -- Staff access changes are performed only through this audited, store-scoped RPC.
 create or replace function public.update_staff_membership(
+  p_store_id uuid,
   p_membership_id uuid,
   p_role_code text default null,
   p_status text default null
@@ -44,6 +45,7 @@ begin
   join public.profiles profile on profile.id = membership.user_id
   join public.stores store_record on store_record.id = membership.store_id
   where membership.user_id = caller_user_id
+    and membership.store_id = p_store_id
     and membership.status = 'active'
     and profile.status = 'active'
     and store_record.status = 'active'
@@ -60,11 +62,7 @@ begin
   into target_membership
   from public.store_memberships membership
   where membership.id = p_membership_id
-    and membership.store_id = (
-      select own_membership.store_id
-      from public.store_memberships own_membership
-      where own_membership.id = caller_membership_id
-    )
+    and membership.store_id = p_store_id
   for update;
 
   if not found then
@@ -143,7 +141,7 @@ begin
 end;
 $$;
 
-revoke all on function public.update_staff_membership(uuid, text, text)
+revoke all on function public.update_staff_membership(uuid, uuid, text, text)
   from public, anon, authenticated, service_role;
 grant execute on function public.update_staff_membership(uuid, text, text) to authenticated;
 
