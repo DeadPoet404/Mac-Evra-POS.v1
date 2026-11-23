@@ -2,7 +2,7 @@
 
 ## Delivery boundary
 
-Phase 2 prepares persistent inventory for review. The migration in `supabase/migrations/20261123120000_phase_02_inventory.sql` must **not** be applied to the hosted project until it has been reviewed and separately approved. It creates no store, Auth user, employee, customer, sale, payment, trade-in, refund, or sample inventory data. The existing local seed still creates only the development store.
+Phase 2 adds persistent inventory and was applied to the hosted project after review, CI validation, and separate approval. The migration in `supabase/migrations/20261123120000_phase_02_inventory.sql` creates no store, Auth user, employee, customer, sale, payment, trade-in, refund, or sample inventory data. The existing local seed still creates only the development store.
 
 The employee and manager interfaces intentionally continue to use `src/lib/inventory.ts`. The application does not yet have a completed employee sign-in flow, so connecting those client screens now would require a fake identity or weaker RLS. Neither is acceptable.
 

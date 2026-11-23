@@ -82,13 +82,13 @@ This is an application-level append-only guarantee. Hosted backups, log retentio
 
 ## Auth integration boundary
 
-`src/proxy.ts` uses the Next.js 16 proxy convention to validate/refresh Supabase access tokens. Browser and server clients use `@supabase/ssr` cookie adapters. The browser has no path to a service-role credential.
+`src/proxy.ts` uses the Next.js 16 proxy convention to validate and refresh Supabase access tokens. Browser and server clients use `@supabase/ssr` cookie adapters. Phase 3 adds email/password sign-in, protected server layouts, effective-permission resolution, and a server-only Auth Admin invitation boundary. The browser has no path to a service-role credential.
 
-The current sign-in page was not connected because it offers Google and Apple while both providers are disabled remotely. Wiring either button now would create a broken flow; adding email/password or magic-link controls would invent and redesign an authentication method. Route redirects are therefore deferred until an approved provider is configured.
+See `employee-auth-phase-3.md` for route permissions, invitation security, hosted SMTP and redirect blockers, and the first-administrator bootstrap boundary.
 
 ## Migration safety
 
-The reviewed Phase 1 foundation migration was applied to the hosted project after explicit approval. Phase 2 remains review-only and has not been applied remotely. Local validation should use:
+The reviewed Phase 1 and Phase 2 migrations were applied to the hosted project after explicit approvals. Phase 3 remains review-only and has not been applied remotely. Local validation should use:
 
 ```bash
 npm run supabase:start

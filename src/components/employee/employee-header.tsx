@@ -1,5 +1,7 @@
 import Link from "next/link"
-import { Apple, ArrowLeft, Boxes, RefreshCcw, ShoppingBag } from "lucide-react"
+import { Apple, ArrowLeft, Boxes, LogOut, RefreshCcw, ShoppingBag } from "lucide-react"
+
+import { signOutAction } from "@/app/auth/actions"
 
 export function EmployeeHeader({
   title,
@@ -36,6 +38,11 @@ export function EmployeeHeader({
           <HeaderLink href="/inventory" icon={Boxes}>Inventory</HeaderLink>
           <HeaderLink href="/trade-in" icon={RefreshCcw}>Process a Swap</HeaderLink>
           <HeaderLink href="/new-sale" icon={ShoppingBag}>New Sale</HeaderLink>
+          <form action={signOutAction}>
+            <button type="submit" className="flex items-center gap-1.5 rounded-full px-3 py-2 text-xs font-medium text-[#68686D] transition hover:bg-black/[0.04] hover:text-[#1D1D1F]">
+              <LogOut size={14} aria-hidden="true" /> Sign out
+            </button>
+          </form>
         </nav>
 
         <div className="flex items-center gap-1 md:hidden">
@@ -45,6 +52,11 @@ export function EmployeeHeader({
           <Link href="/new-sale" aria-label="New sale" className="flex size-9 items-center justify-center rounded-full transition hover:bg-black/[0.04] active:scale-95">
             <ShoppingBag size={17} aria-hidden="true" />
           </Link>
+          <form action={signOutAction}>
+            <button type="submit" aria-label="Sign out" className="flex size-9 items-center justify-center rounded-full transition hover:bg-black/[0.04] active:scale-95">
+              <LogOut size={17} aria-hidden="true" />
+            </button>
+          </form>
         </div>
       </div>
     </header>

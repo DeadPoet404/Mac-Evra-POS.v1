@@ -1,18 +1,15 @@
-name: Phase 2 validation
+name: Application and database validation
 
 on:
   pull_request:
   push:
-    branches:
-      - main
-      - arena/77b806d4-mac-evra-pos-v1
   workflow_dispatch:
 
 permissions:
   contents: read
 
 concurrency:
-  group: phase-2-validation-${{ github.workflow }}-${{ github.ref }}
+  group: validation-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -33,6 +30,9 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Test authentication policy
+        run: npm test
 
       - name: Lint
         run: npm run lint
@@ -82,10 +82,15 @@ jobs:
             *) echo "Refusing a non-local Supabase URL." >&2; exit 1 ;;
           esac
 
+          # Supabase CLI v3 no longer emits the local mail-capture URL in env
+          # output, while this repository fixes its Inbucket port in config.
+          echo "INBUCKET_URL=http://127.0.0.1:54324" >> .env.local
+
           {
             echo "NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL"
             echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
             echo "SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY"
+            echo "INBUCKET_URL=http://127.0.0.1:54324"
           } >> "$GITHUB_ENV"
 
       - name: Rebuild fresh database from migrations
@@ -94,11 +99,64 @@ jobs:
       - name: Lint database schema
         run: npm run db:lint
 
-      - name: Run Phase 1 and Phase 2 pgTAP suites
-        run: npm run db:test
+      - name: Run Phase 1, Phase 2, and Phase 3 pgTAP suites
+        shell: bash
+        run: |
+          set +e
+          npm run db:test 2>&1 | tee /tmp/db-test.log
+          status=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            details=$(tail -n 80 /tmp/db-test.log)
+            details=${details//'%'/'%25'}
+            details=${details//$'\r'/'%0D'}
+            details=${details//$'\n'/'%0A'}
+            echo "::error title=pgTAP database test failure::$details"
+          fi
+
+          exit "$status"
 
       - name: Run authenticated inventory concurrency tests
         run: npm run db:test:inventory-concurrency
+
+      - name: Run invitation suspension concurrency tests
+        run: npm run db:test:auth-concurrency
+
+      - name: Run authenticated session and invitation email integration tests
+        shell: bash
+        run: |
+          npm run build
+          npm start -- --hostname 127.0.0.1 > /tmp/next-server.log 2>&1 &
+          app_pid=$!
+          trap 'kill "$app_pid" 2>/dev/null || true' EXIT
+
+          for attempt in {1..30}; do
+            if curl --fail --silent --output /dev/null http://127.0.0.1:3000/; then
+              break
+            fi
+            if ! kill -0 "$app_pid" 2>/dev/null; then
+              cat /tmp/next-server.log
+              exit 1
+            fi
+            sleep 1
+          done
+          curl --fail --silent --output /dev/null http://127.0.0.1:3000/
+
+          set +e
+          npm run db:test:auth-sessions 2>&1 | tee /tmp/auth-session-test.log
+          status=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            details=$(tail -n 100 /tmp/auth-session-test.log)
+            details=${details//'%'/'%25'}
+            details=${details//$'\r'/'%0D'}
+            details=${details//$'\n'/'%0A'}
+            echo "::error title=Authenticated session integration failure::$details"
+          fi
+
+          exit "$status"
 
       - name: Stop and remove local Supabase
         if: always()
