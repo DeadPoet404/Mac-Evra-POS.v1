@@ -9,6 +9,7 @@ import {
   normalizeOpeningStockImei,
   parseActivationInput,
   parseBatchDeviceInput,
+  parseConfirmSupplierInvoiceInput,
   parseImeiBatch,
   parseIndividualDeviceInput,
   parseInspectionInput,
@@ -24,6 +25,15 @@ import {
 function form(entries) {
   const formData = new FormData()
   for (const [key, value] of Object.entries(entries)) formData.set(key, value)
+  return formData
+}
+
+function batchForm(rows) {
+  const formData = new FormData()
+  formData.set("deviceCount", String(rows.length))
+  for (const [index, row] of rows.entries()) {
+    for (const [key, value] of Object.entries(row)) formData.set(`devices.${index}.${key}`, value)
+  }
   return formData
 }
 
@@ -61,7 +71,7 @@ test("opening-stock IMEIs require a real Luhn check digit and reject placeholder
   assert.equal(isValidRealImei("not-an-imei"), false)
 })
 
-test("batch input normalizes unique real IMEIs and rejects duplicates or invalid check digits", () => {
+test("batch IMEI parsing normalizes unique real identifiers", () => {
   assert.deepEqual(
     parseImeiBatch("357000000000017\n35 7000-000 000 025,357000000000033"),
     ["357000000000017", "357000000000025", "357000000000033"]
@@ -83,38 +93,86 @@ test("physical inspection requires every explicit check to pass", () => {
   assert.throws(() => parseInspectionInput(form({ ...inspectionChecks, inspectionNotes: "line\nbreak" })), /control characters/)
 })
 
-test("individual and batch receiving derive the same structured device payload", () => {
-  const common = {
+test("individual receiving and device-scoped batch parsing keep complete structured payloads", () => {
+  const individual = parseIndividualDeviceInput(form({
     lineId: "70000000-0000-4000-8000-000000000001",
+    imei: "35 7000-000 000 017",
     colour: "  Natural Titanium  ",
     condition: "excellent",
     batteryHealth: "98",
     ...inspectionChecks,
     inspectionNotes: "Checked in store",
-  }
-  const individual = parseIndividualDeviceInput(form({ ...common, imei: "35 7000-000 000 017" }))
+  }))
   assert.equal(individual.imei, "357000000000017")
   assert.equal(individual.colour, "Natural Titanium")
   assert.equal(individual.battery_health, 98)
   assert.equal(individual.inspection.charging_port_passed, true)
 
-  const batch = parseBatchDeviceInput(form({ ...common, imeiBatch: "357000000000025\n357000000000033" }))
+  const batch = parseBatchDeviceInput(batchForm([
+    {
+      imei: "357000000000025",
+      colour: "Blue",
+      condition: "excellent",
+      batteryHealth: "98",
+      ...inspectionChecks,
+      inspectionNotes: "First device",
+    },
+    {
+      imei: "357000000000033",
+      colour: "White",
+      condition: "good",
+      batteryHealth: "91",
+      ...inspectionChecks,
+      inspectionNotes: "Second device",
+    },
+  ]))
   assert.equal(batch.length, 2)
   assert.deepEqual(batch.map((device) => device.imei), ["357000000000025", "357000000000033"])
-  assert.deepEqual(batch.map((device) => device.inspection), [individual.inspection, individual.inspection])
+  assert.deepEqual(batch.map((device) => device.colour), ["Blue", "White"])
+  assert.deepEqual(batch.map((device) => device.condition), ["excellent", "good"])
+  assert.deepEqual(batch.map((device) => device.battery_health), [98, 91])
+  assert.deepEqual(batch.map((device) => device.inspection.notes), ["First device", "Second device"])
 })
 
-test("invoice, model, correction, activation, and repricing inputs are strictly bounded", () => {
+test("invoice, confirmation, model, correction, activation, and repricing inputs are strictly bounded", () => {
   assert.deepEqual(parseModelRegistrationInput(form({ modelName: "  iPhone 16 Pro ", storageGb: "256", supplierSku: "apl-16p" })), {
     modelName: "iPhone 16 Pro",
     storageGb: 256,
     supplierSku: "APL-16P",
   })
-  assert.deepEqual(parseSupplierInvoiceInput(form({ supplierName: "Approved Supplier", invoiceNumber: "SUP-2026-001", invoiceDate: "2026-11-23", notes: "  Delivery 1 " })), {
+  assert.deepEqual(parseSupplierInvoiceInput(form({
     supplierName: "Approved Supplier",
     invoiceNumber: "SUP-2026-001",
     invoiceDate: "2026-11-23",
+    declaredTotalGhs: "4700.00",
+    notes: "  Delivery 1 ",
+  })), {
+    supplierName: "Approved Supplier",
+    invoiceNumber: "SUP-2026-001",
+    invoiceDate: "2026-11-23",
+    declaredTotalPesewas: 470000,
     notes: "Delivery 1",
+  })
+  assert.equal(parseSupplierInvoiceInput(form({
+    supplierName: "Approved Supplier",
+    invoiceNumber: "",
+    invoiceDate: "2026-11-23",
+    declaredTotalGhs: "1.00",
+    notes: "",
+  })).invoiceNumber, null)
+  assert.deepEqual(parseConfirmSupplierInvoiceInput(form({
+    invoiceId: "70000000-0000-4000-8000-000000000001",
+    expectedDeclaredTotalPesewas: "470000",
+    expectedLineCount: "2",
+    expectedQuantityInvoiced: "7",
+    expectedCalculatedTotalPesewas: "470000",
+    totalsConfirmed: "on",
+  })), {
+    invoiceId: "70000000-0000-4000-8000-000000000001",
+    expectedDeclaredTotalPesewas: 470000,
+    expectedLineCount: 2,
+    expectedQuantityInvoiced: 7,
+    expectedCalculatedTotalPesewas: 470000,
   })
   assert.equal(parseInvoiceLineInput(form({
     invoiceId: "70000000-0000-4000-8000-000000000001",
@@ -127,12 +185,15 @@ test("invoice, model, correction, activation, and repricing inputs are strictly 
   const correction = parseInvoiceCorrectionInput(form({
     invoiceId: "70000000-0000-4000-8000-000000000001",
     supplierName: "Approved Supplier",
-    invoiceNumber: "SUP-2026-001A",
+    invoiceNumber: "",
     invoiceDate: "2026-11-23",
+    declaredTotalGhs: "4700.00",
     notes: "",
     reason: "Supplier reissued the invoice",
   }))
   assert.equal(correction.reason, "Supplier reissued the invoice")
+  assert.equal(correction.invoiceNumber, null)
+  assert.equal(correction.declaredTotalPesewas, 470000)
 
   const lineCorrection = parseInvoiceLineCorrectionInput(form({
     lineId: "70000000-0000-4000-8000-000000000003",
@@ -142,7 +203,10 @@ test("invoice, model, correction, activation, and repricing inputs are strictly 
   }))
   assert.equal(lineCorrection.unitCostPesewas, 705050)
 
-  assert.throws(() => parseSupplierInvoiceInput(form({ supplierName: "Approved Supplier", invoiceNumber: "SUP-1", invoiceDate: "2026-02-30", notes: "" })), /valid invoice date/)
+  assert.throws(() => parseSupplierInvoiceInput(form({ supplierName: "Approved Supplier", invoiceNumber: "SUP-1", invoiceDate: "2026-02-30", declaredTotalGhs: "1.00", notes: "" })), /valid invoice date/)
+  assert.throws(() => parseSupplierInvoiceInput(form({ supplierName: "Approved Supplier", invoiceNumber: "x", invoiceDate: "2026-11-23", declaredTotalGhs: "1.00", notes: "" })), /valid supplier invoice number/)
+  assert.throws(() => parseSupplierInvoiceInput(form({ supplierName: "Approved Supplier", invoiceNumber: "", invoiceDate: "2026-11-23", declaredTotalGhs: "0", notes: "" })), /greater than zero/)
+  assert.throws(() => parseConfirmSupplierInvoiceInput(form({ invoiceId: "70000000-0000-4000-8000-000000000001", expectedDeclaredTotalPesewas: "470000", expectedLineCount: "2", expectedQuantityInvoiced: "7", expectedCalculatedTotalPesewas: "470000" })), /Confirm/)
   assert.throws(() => parseInvoiceLineInput(form({
     invoiceId: "not-a-uuid",
     modelCatalogueId: "70000000-0000-4000-8000-000000000002",

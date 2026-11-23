@@ -256,7 +256,8 @@ create table public.supplier_invoices (
   id uuid primary key default gen_random_uuid(),
   store_id uuid not null references public.stores(id) on update cascade on delete restrict,
   supplier_name text not null,
-  supplier_invoice_number text not null,
+  supplier_invoice_number text,
+  declared_total_pesewas bigint not null,
   invoice_date date not null,
   currency text not null default 'GHS',
   status text not null default 'open',
@@ -265,11 +266,19 @@ create table public.supplier_invoices (
   created_by_membership_id uuid not null,
   created_by_display_name text not null,
   closed_at timestamptz,
+  confirmed_at timestamptz,
+  confirmed_by_user_id uuid references public.profiles(id) on update cascade on delete restrict,
+  confirmed_by_membership_id uuid,
+  confirmed_by_display_name text,
   created_at timestamptz not null default statement_timestamp(),
   updated_at timestamptz not null default statement_timestamp(),
   constraint supplier_invoices_identity_store_unique unique (id, store_id),
   constraint supplier_invoices_creator_membership_fk
     foreign key (created_by_membership_id, store_id, created_by_user_id)
+    references public.store_memberships(id, store_id, user_id)
+    on update cascade on delete restrict,
+  constraint supplier_invoices_confirmation_membership_fk
+    foreign key (confirmed_by_membership_id, store_id, confirmed_by_user_id)
     references public.store_memberships(id, store_id, user_id)
     on update cascade on delete restrict,
   constraint supplier_invoices_supplier_name_valid check (
@@ -278,10 +287,16 @@ create table public.supplier_invoices (
     and supplier_name !~ '[[:cntrl:]]'
   ),
   constraint supplier_invoices_number_valid check (
-    supplier_invoice_number = btrim(supplier_invoice_number)
-    and length(supplier_invoice_number) between 2 and 80
-    and supplier_invoice_number ~ '^[A-Za-z0-9][A-Za-z0-9._/ -]*$'
-    and supplier_invoice_number !~ '[[:cntrl:]]'
+    supplier_invoice_number is null
+    or (
+      supplier_invoice_number = btrim(supplier_invoice_number)
+      and length(supplier_invoice_number) between 2 and 80
+      and supplier_invoice_number ~ '^[A-Za-z0-9][A-Za-z0-9._/ -]*$'
+      and supplier_invoice_number !~ '[[:cntrl:]]'
+    )
+  ),
+  constraint supplier_invoices_declared_total_valid check (
+    declared_total_pesewas > 0 and declared_total_pesewas <= 100000000000000
   ),
   constraint supplier_invoices_currency_ghs check (currency = 'GHS'),
   constraint supplier_invoices_status_valid check (status in ('open', 'closed')),
@@ -294,11 +309,27 @@ create table public.supplier_invoices (
   constraint supplier_invoices_closed_consistent check (
     (status = 'open' and closed_at is null)
     or (status = 'closed' and closed_at is not null)
+  ),
+  constraint supplier_invoices_confirmation_consistent check (
+    (
+      confirmed_at is null
+      and confirmed_by_user_id is null
+      and confirmed_by_membership_id is null
+      and confirmed_by_display_name is null
+    )
+    or
+    (
+      confirmed_at is not null
+      and confirmed_by_user_id is not null
+      and confirmed_by_membership_id is not null
+      and length(btrim(confirmed_by_display_name)) between 1 and 160
+    )
   )
 );
 
 create unique index supplier_invoices_store_number_unique
-  on public.supplier_invoices (store_id, lower(supplier_invoice_number));
+  on public.supplier_invoices (store_id, lower(supplier_invoice_number))
+  where supplier_invoice_number is not null;
 create index supplier_invoices_store_status_date_idx
   on public.supplier_invoices (store_id, status, invoice_date desc);
 
@@ -311,6 +342,7 @@ create table public.supplier_invoice_lines (
   device_model_id uuid not null references public.device_models(id) on update cascade on delete restrict,
   quantity_invoiced integer not null,
   unit_cost_pesewas bigint not null,
+  line_total_pesewas bigint generated always as (quantity_invoiced::bigint * unit_cost_pesewas) stored,
   currency text not null default 'GHS',
   notes text,
   created_by_user_id uuid not null references public.profiles(id) on update cascade on delete restrict,
@@ -338,6 +370,9 @@ create table public.supplier_invoice_lines (
   constraint supplier_invoice_lines_quantity_valid check (quantity_invoiced between 1 and 1000),
   constraint supplier_invoice_lines_cost_valid check (
     unit_cost_pesewas > 0 and unit_cost_pesewas <= 100000000000000
+  ),
+  constraint supplier_invoice_lines_line_total_valid check (
+    line_total_pesewas > 0 and line_total_pesewas <= 100000000000000000
   ),
   constraint supplier_invoice_lines_currency_ghs check (currency = 'GHS'),
   constraint supplier_invoice_lines_notes_valid check (
@@ -589,6 +624,83 @@ as $$
   where opening_unit.id = target_unit_id;
 $$;
 
+create or replace function private.opening_stock_line_total(target_line_id uuid)
+returns bigint
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select case
+    when private.opening_stock_cost_visible(invoice_line.store_id)
+      then invoice_line.line_total_pesewas
+    else null
+  end
+  from public.supplier_invoice_lines invoice_line
+  where invoice_line.id = target_line_id;
+$$;
+
+create or replace function private.opening_stock_invoice_declared_total(target_invoice_id uuid)
+returns bigint
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select case
+    when private.opening_stock_cost_visible(invoice.store_id)
+      then invoice.declared_total_pesewas
+    else null
+  end
+  from public.supplier_invoices invoice
+  where invoice.id = target_invoice_id;
+$$;
+
+create or replace function private.opening_stock_invoice_total(target_invoice_id uuid)
+returns numeric
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select case
+    when private.opening_stock_cost_visible(invoice.store_id)
+      then coalesce((
+        select sum(invoice_line.line_total_pesewas::numeric)
+        from public.supplier_invoice_lines invoice_line
+        where invoice_line.invoice_id = invoice.id
+      ), 0::numeric)
+    else null
+  end
+  from public.supplier_invoices invoice
+  where invoice.id = target_invoice_id;
+$$;
+
+create or replace function private.opening_stock_invoice_reconciled(target_invoice_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select coalesce(
+    private.opening_stock_cost_visible(invoice.store_id)
+    and exists (
+      select 1
+      from public.supplier_invoice_lines invoice_line
+      where invoice_line.invoice_id = invoice.id
+    )
+    and coalesce((
+      select sum(invoice_line.line_total_pesewas::numeric)
+      from public.supplier_invoice_lines invoice_line
+      where invoice_line.invoice_id = invoice.id
+    ), 0::numeric) = invoice.declared_total_pesewas::numeric,
+    false
+  )
+  from public.supplier_invoices invoice
+  where invoice.id = target_invoice_id;
+$$;
+
 create or replace function private.prevent_opening_stock_ledger_mutation()
 returns trigger
 language plpgsql
@@ -779,10 +891,16 @@ select
   invoice.currency,
   invoice.status,
   invoice.notes,
+  private.opening_stock_invoice_declared_total(invoice.id) as declared_total_pesewas,
+  private.opening_stock_cost_visible(invoice.store_id) as cost_visible,
   invoice.created_by_user_id,
   invoice.created_by_membership_id,
   invoice.created_by_display_name,
   invoice.closed_at,
+  invoice.confirmed_at,
+  invoice.confirmed_by_user_id,
+  invoice.confirmed_by_membership_id,
+  invoice.confirmed_by_display_name,
   invoice.created_at,
   invoice.updated_at
 from public.supplier_invoices invoice
@@ -815,7 +933,8 @@ select
   count(unit.id) filter (where unit.status = 'activated')::integer as quantity_activated,
   greatest(line.quantity_invoiced - count(unit.id)::integer, 0) as quantity_outstanding,
   private.opening_stock_cost_visible(line.store_id) as cost_visible,
-  private.opening_stock_line_cost(line.id) as unit_cost_pesewas
+  private.opening_stock_line_cost(line.id) as unit_cost_pesewas,
+  private.opening_stock_line_total(line.id) as line_total_pesewas
 from public.supplier_invoice_lines line
 join public.device_models model on model.id = line.device_model_id
 join public.opening_stock_models catalogue on catalogue.id = line.model_catalogue_id
@@ -915,6 +1034,40 @@ from public.opening_stock_price_changes price_change
 where private.is_active_store_member(price_change.store_id)
   and private.has_store_permission(price_change.store_id, 'access_manager_workspace');
 
+create view public.opening_stock_invoice_reconciliation_view
+with (security_invoker = true, security_barrier = true)
+as
+select
+  invoice.id as invoice_id,
+  invoice.store_id,
+  invoice.supplier_name,
+  invoice.supplier_invoice_number,
+  invoice.invoice_date,
+  invoice.status,
+  count(invoice_line.id)::integer as line_count,
+  coalesce(sum(invoice_line.quantity_invoiced), 0)::integer as quantity_invoiced,
+  private.opening_stock_invoice_declared_total(invoice.id) as declared_total_pesewas,
+  private.opening_stock_invoice_total(invoice.id) as calculated_total_pesewas,
+  private.opening_stock_invoice_total(invoice.id)
+    - private.opening_stock_invoice_declared_total(invoice.id) as difference_pesewas,
+  private.opening_stock_invoice_reconciled(invoice.id) as reconciled,
+  private.opening_stock_cost_visible(invoice.store_id) as cost_visible,
+  invoice.confirmed_at,
+  invoice.confirmed_by_display_name
+from public.supplier_invoices invoice
+left join public.supplier_invoice_lines invoice_line on invoice_line.invoice_id = invoice.id
+where private.is_active_store_member(invoice.store_id)
+  and private.has_store_permission(invoice.store_id, 'access_manager_workspace')
+group by
+  invoice.id,
+  invoice.store_id,
+  invoice.supplier_name,
+  invoice.supplier_invoice_number,
+  invoice.invoice_date,
+  invoice.status,
+  invoice.confirmed_at,
+  invoice.confirmed_by_display_name;
+
 create or replace function public.register_opening_stock_model(
   p_store_id uuid,
   p_model_name text,
@@ -1013,6 +1166,7 @@ create or replace function public.create_supplier_invoice(
   p_supplier_name text,
   p_supplier_invoice_number text,
   p_invoice_date date,
+  p_declared_total_pesewas bigint,
   p_notes text
 )
 returns table (invoice_id uuid, status text)
@@ -1025,7 +1179,7 @@ declare
   caller_membership_id uuid;
   caller_display_name text;
   normalized_supplier_name text := btrim(coalesce(p_supplier_name, ''));
-  normalized_number text := btrim(coalesce(p_supplier_invoice_number, ''));
+  normalized_number text := nullif(btrim(coalesce(p_supplier_invoice_number, '')), '');
   normalized_notes text := nullif(btrim(coalesce(p_notes, '')), '');
   new_invoice_id uuid := gen_random_uuid();
   invoice_status text := 'open';
@@ -1038,10 +1192,18 @@ begin
     or normalized_supplier_name ~ '[[:cntrl:]]' then
     raise exception using errcode = '22023', message = 'valid supplier name required';
   end if;
-  if length(normalized_number) not between 2 and 80
-    or normalized_number !~ '^[A-Za-z0-9][A-Za-z0-9._/ -]*$'
-    or normalized_number ~ '[[:cntrl:]]' then
-    raise exception using errcode = '22023', message = 'valid supplier invoice number required';
+  if normalized_number is not null
+    and (
+      length(normalized_number) not between 2 and 80
+      or normalized_number !~ '^[A-Za-z0-9][A-Za-z0-9._/ -]*$'
+      or normalized_number ~ '[[:cntrl:]]'
+    ) then
+    raise exception using errcode = '22023', message = 'valid optional supplier invoice number required';
+  end if;
+  if p_declared_total_pesewas is null
+    or p_declared_total_pesewas <= 0
+    or p_declared_total_pesewas > 100000000000000 then
+    raise exception using errcode = '22023', message = 'declared total must be positive integer pesewas';
   end if;
   if p_invoice_date is null
     or p_invoice_date < date '2000-01-01'
@@ -1054,13 +1216,13 @@ begin
   end if;
 
   insert into public.supplier_invoices (
-    id, store_id, supplier_name, supplier_invoice_number, invoice_date,
-    currency, status, notes, created_by_user_id, created_by_membership_id,
-    created_by_display_name, created_at, updated_at
+    id, store_id, supplier_name, supplier_invoice_number, declared_total_pesewas,
+    invoice_date, currency, status, notes, created_by_user_id,
+    created_by_membership_id, created_by_display_name, created_at, updated_at
   )
   values (
     new_invoice_id, p_store_id, normalized_supplier_name, normalized_number,
-    p_invoice_date, 'GHS', invoice_status, normalized_notes,
+    p_declared_total_pesewas, p_invoice_date, 'GHS', invoice_status, normalized_notes,
     caller_user_id, caller_membership_id, caller_display_name,
     observed_at, observed_at
   );
@@ -1071,12 +1233,135 @@ begin
     jsonb_build_object(
       'supplier_name', normalized_supplier_name,
       'supplier_invoice_number', normalized_number,
-      'invoice_date', p_invoice_date
+      'invoice_date', p_invoice_date,
+      'declared_total_pesewas', p_declared_total_pesewas
     ),
     observed_at
   );
 
   return query select new_invoice_id, invoice_status;
+end;
+$$;
+
+create or replace function public.confirm_supplier_invoice(
+  p_invoice_id uuid,
+  p_expected_declared_total_pesewas bigint,
+  p_expected_line_count integer,
+  p_expected_quantity_invoiced integer,
+  p_expected_calculated_total_pesewas bigint,
+  p_totals_confirmed boolean
+)
+returns table (
+  invoice_id uuid,
+  declared_total_pesewas bigint,
+  calculated_total_pesewas bigint,
+  line_count integer,
+  quantity_invoiced integer,
+  confirmed_at timestamptz
+)
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  caller_user_id uuid := auth.uid();
+  caller_membership_id uuid;
+  caller_display_name text;
+  invoice_record public.supplier_invoices%rowtype;
+  computed_line_count integer;
+  computed_quantity_numeric numeric;
+  computed_quantity integer;
+  computed_total_numeric numeric;
+  computed_total bigint;
+  observed_at timestamptz := statement_timestamp();
+begin
+  if p_totals_confirmed is not true then
+    raise exception using errcode = '22023', message = 'explicit totals confirmation required';
+  end if;
+  if p_expected_declared_total_pesewas is null
+    or p_expected_declared_total_pesewas <= 0
+    or p_expected_declared_total_pesewas > 100000000000000
+    or p_expected_calculated_total_pesewas is null
+    or p_expected_calculated_total_pesewas <= 0
+    or p_expected_calculated_total_pesewas > 100000000000000
+    or p_expected_line_count is null
+    or p_expected_line_count not between 1 and 1000
+    or p_expected_quantity_invoiced is null
+    or p_expected_quantity_invoiced not between 1 and 100000 then
+    raise exception using errcode = '22023', message = 'valid expected invoice reconciliation values required';
+  end if;
+
+  select invoice.* into invoice_record
+  from public.supplier_invoices invoice
+  where invoice.id = p_invoice_id
+  for update;
+
+  if not found then
+    raise exception using errcode = '42501', message = 'supplier invoice not found';
+  end if;
+
+  caller_membership_id := private.opening_stock_actor_membership(invoice_record.store_id, false);
+  caller_display_name := private.opening_stock_actor_name(caller_user_id);
+
+  if not private.opening_stock_cost_visible(invoice_record.store_id) then
+    raise exception using errcode = '42501', message = 'purchase-cost visibility required';
+  end if;
+  if invoice_record.status <> 'open' then
+    raise exception using errcode = '23514', message = 'invoice is not open';
+  end if;
+  if invoice_record.confirmed_at is not null then
+    raise exception using errcode = '23514', message = 'invoice totals are already confirmed';
+  end if;
+  if p_expected_declared_total_pesewas <> invoice_record.declared_total_pesewas then
+    raise exception using errcode = '23514', message = 'declared total changed; reload before confirming';
+  end if;
+
+  select
+    count(invoice_line.id)::integer,
+    coalesce(sum(invoice_line.quantity_invoiced::numeric), 0::numeric),
+    coalesce(sum(invoice_line.line_total_pesewas::numeric), 0::numeric)
+  into computed_line_count, computed_quantity_numeric, computed_total_numeric
+  from public.supplier_invoice_lines invoice_line
+  where invoice_line.invoice_id = invoice_record.id;
+
+  if computed_line_count <> p_expected_line_count
+    or computed_quantity_numeric <> p_expected_quantity_invoiced::numeric
+    or computed_total_numeric <> p_expected_calculated_total_pesewas::numeric
+    or computed_total_numeric <> invoice_record.declared_total_pesewas::numeric then
+    raise exception using errcode = '23514', message = 'invoice line totals do not reconcile with the declared total';
+  end if;
+
+  computed_quantity := computed_quantity_numeric::integer;
+  computed_total := computed_total_numeric::bigint;
+
+  update public.supplier_invoices
+  set confirmed_at = observed_at,
+      confirmed_by_user_id = caller_user_id,
+      confirmed_by_membership_id = caller_membership_id,
+      confirmed_by_display_name = caller_display_name,
+      updated_at = observed_at
+  where id = invoice_record.id;
+
+  perform private.opening_stock_audit(
+    invoice_record.store_id, caller_user_id, caller_membership_id,
+    'opening_stock.invoice_totals_confirmed', 'supplier_invoice', invoice_record.id,
+    jsonb_build_object(
+      'declared_total_pesewas', invoice_record.declared_total_pesewas,
+      'calculated_total_pesewas', computed_total,
+      'line_count', computed_line_count,
+      'quantity_invoiced', computed_quantity
+    ),
+    observed_at
+  );
+
+  return query
+  select
+    invoice_record.id,
+    invoice_record.declared_total_pesewas,
+    computed_total,
+    computed_line_count,
+    computed_quantity,
+    observed_at;
 end;
 $$;
 
@@ -1101,6 +1386,7 @@ declare
   normalized_notes text := nullif(btrim(coalesce(p_notes, '')), '');
   new_line_id uuid := gen_random_uuid();
   next_line_number integer;
+  confirmation_reset boolean := false;
   observed_at timestamptz := statement_timestamp();
 begin
   select invoice.* into invoice_record
@@ -1160,6 +1446,17 @@ begin
     observed_at, observed_at
   );
 
+  if invoice_record.confirmed_at is not null then
+    update public.supplier_invoices
+    set confirmed_at = null,
+        confirmed_by_user_id = null,
+        confirmed_by_membership_id = null,
+        confirmed_by_display_name = null,
+        updated_at = observed_at
+    where id = invoice_record.id;
+    confirmation_reset := true;
+  end if;
+
   perform private.opening_stock_audit(
     invoice_record.store_id, caller_user_id, caller_membership_id,
     'opening_stock.invoice_line_added', 'supplier_invoice_line', new_line_id,
@@ -1167,7 +1464,8 @@ begin
       'invoice_id', invoice_record.id,
       'line_number', next_line_number,
       'model_catalogue_id', catalogue_record.id,
-      'quantity_invoiced', p_quantity_invoiced
+      'quantity_invoiced', p_quantity_invoiced,
+      'confirmation_reset', confirmation_reset
     ),
     observed_at
   );
@@ -1181,6 +1479,7 @@ create or replace function public.correct_supplier_invoice(
   p_supplier_name text,
   p_supplier_invoice_number text,
   p_invoice_date date,
+  p_declared_total_pesewas bigint,
   p_notes text,
   p_reason text
 )
@@ -1195,12 +1494,13 @@ declare
   caller_display_name text;
   invoice_record public.supplier_invoices%rowtype;
   normalized_supplier_name text := btrim(coalesce(p_supplier_name, ''));
-  normalized_number text := btrim(coalesce(p_supplier_invoice_number, ''));
+  normalized_number text := nullif(btrim(coalesce(p_supplier_invoice_number, '')), '');
   normalized_notes text := nullif(btrim(coalesce(p_notes, '')), '');
   normalized_reason text := btrim(coalesce(p_reason, ''));
   before_data jsonb;
   after_data jsonb;
   new_correction_id uuid := gen_random_uuid();
+  confirmation_reset boolean := false;
   observed_at timestamptz := statement_timestamp();
 begin
   select invoice.* into invoice_record
@@ -1219,11 +1519,21 @@ begin
     raise exception using errcode = '23514', message = 'closed invoice cannot be corrected';
   end if;
   if length(normalized_supplier_name) not between 2 and 160
-    or normalized_supplier_name ~ '[[:cntrl:]]'
-    or length(normalized_number) not between 2 and 80
-    or normalized_number !~ '^[A-Za-z0-9][A-Za-z0-9._/ -]*$'
-    or normalized_number ~ '[[:cntrl:]]' then
-    raise exception using errcode = '22023', message = 'valid corrected invoice identity required';
+    or normalized_supplier_name ~ '[[:cntrl:]]' then
+    raise exception using errcode = '22023', message = 'valid corrected supplier name required';
+  end if;
+  if normalized_number is not null
+    and (
+      length(normalized_number) not between 2 and 80
+      or normalized_number !~ '^[A-Za-z0-9][A-Za-z0-9._/ -]*$'
+      or normalized_number ~ '[[:cntrl:]]'
+    ) then
+    raise exception using errcode = '22023', message = 'valid corrected optional invoice reference required';
+  end if;
+  if p_declared_total_pesewas is null
+    or p_declared_total_pesewas <= 0
+    or p_declared_total_pesewas > 100000000000000 then
+    raise exception using errcode = '22023', message = 'valid corrected declared total required';
   end if;
   if p_invoice_date is null
     or p_invoice_date < date '2000-01-01'
@@ -1243,12 +1553,14 @@ begin
     'supplier_name', invoice_record.supplier_name,
     'supplier_invoice_number', invoice_record.supplier_invoice_number,
     'invoice_date', invoice_record.invoice_date,
+    'declared_total_pesewas', invoice_record.declared_total_pesewas,
     'notes', invoice_record.notes
   );
   after_data := jsonb_build_object(
     'supplier_name', normalized_supplier_name,
     'supplier_invoice_number', normalized_number,
     'invoice_date', p_invoice_date,
+    'declared_total_pesewas', p_declared_total_pesewas,
     'notes', normalized_notes
   );
 
@@ -1256,11 +1568,20 @@ begin
     raise exception using errcode = '22023', message = 'correction must change invoice data';
   end if;
 
+  if invoice_record.confirmed_at is not null then
+    confirmation_reset := true;
+  end if;
+
   update public.supplier_invoices
   set supplier_name = normalized_supplier_name,
       supplier_invoice_number = normalized_number,
       invoice_date = p_invoice_date,
+      declared_total_pesewas = p_declared_total_pesewas,
       notes = normalized_notes,
+      confirmed_at = null,
+      confirmed_by_user_id = null,
+      confirmed_by_membership_id = null,
+      confirmed_by_display_name = null,
       updated_at = observed_at
   where id = invoice_record.id;
 
@@ -1277,7 +1598,11 @@ begin
   perform private.opening_stock_audit(
     invoice_record.store_id, caller_user_id, caller_membership_id,
     'opening_stock.invoice_corrected', 'supplier_invoice', invoice_record.id,
-    jsonb_build_object('correction_id', new_correction_id, 'reason', normalized_reason),
+    jsonb_build_object(
+      'correction_id', new_correction_id,
+      'reason', normalized_reason,
+      'confirmation_reset', confirmation_reset
+    ),
     observed_at
   );
 
@@ -1307,6 +1632,7 @@ declare
   before_data jsonb;
   after_data jsonb;
   new_correction_id uuid := gen_random_uuid();
+  confirmation_reset boolean := false;
   observed_at timestamptz := statement_timestamp();
 begin
   select line.* into line_record
@@ -1379,6 +1705,17 @@ begin
       updated_at = observed_at
   where id = line_record.id;
 
+  if invoice_record.confirmed_at is not null then
+    update public.supplier_invoices
+    set confirmed_at = null,
+        confirmed_by_user_id = null,
+        confirmed_by_membership_id = null,
+        confirmed_by_display_name = null,
+        updated_at = observed_at
+    where id = invoice_record.id;
+    confirmation_reset := true;
+  end if;
+
   insert into public.supplier_invoice_corrections (
     id, store_id, invoice_id, line_id, entity_type, before_data, after_data,
     reason, actor_user_id, actor_membership_id, actor_display_name, created_at
@@ -1392,7 +1729,11 @@ begin
   perform private.opening_stock_audit(
     line_record.store_id, caller_user_id, caller_membership_id,
     'opening_stock.invoice_line_corrected', 'supplier_invoice_line', line_record.id,
-    jsonb_build_object('correction_id', new_correction_id, 'reason', normalized_reason),
+    jsonb_build_object(
+      'correction_id', new_correction_id,
+      'reason', normalized_reason,
+      'confirmation_reset', confirmation_reset
+    ),
     observed_at
   );
 
@@ -1973,6 +2314,10 @@ revoke all on function private.opening_stock_audit(uuid, uuid, uuid, text, text,
 revoke all on function private.opening_stock_lock_imei(text) from public;
 revoke all on function private.opening_stock_imei_available(text, uuid) from public;
 revoke all on function private.opening_stock_line_cost(uuid) from public;
+revoke all on function private.opening_stock_line_total(uuid) from public;
+revoke all on function private.opening_stock_invoice_declared_total(uuid) from public;
+revoke all on function private.opening_stock_invoice_total(uuid) from public;
+revoke all on function private.opening_stock_invoice_reconciled(uuid) from public;
 revoke all on function private.opening_stock_unit_cost(uuid) from public;
 revoke all on function private.prevent_opening_stock_ledger_mutation() from public;
 revoke all on function private.prevent_opening_stock_unit_delete() from public;
@@ -1985,6 +2330,10 @@ grant execute on function private.is_valid_opening_stock_imei(text) to authentic
 grant execute on function private.is_valid_opening_stock_inspection(jsonb) to authenticated, service_role;
 grant execute on function private.opening_stock_cost_visible(uuid) to authenticated, service_role;
 grant execute on function private.opening_stock_line_cost(uuid) to authenticated, service_role;
+grant execute on function private.opening_stock_line_total(uuid) to authenticated, service_role;
+grant execute on function private.opening_stock_invoice_declared_total(uuid) to authenticated, service_role;
+grant execute on function private.opening_stock_invoice_total(uuid) to authenticated, service_role;
+grant execute on function private.opening_stock_invoice_reconciled(uuid) to authenticated, service_role;
 grant execute on function private.opening_stock_unit_cost(uuid) to authenticated, service_role;
 
 revoke all on table public.opening_stock_models from anon, authenticated, service_role;
@@ -1995,7 +2344,12 @@ revoke all on table public.supplier_invoice_corrections from anon, authenticated
 revoke all on table public.opening_stock_price_changes from anon, authenticated, service_role;
 
 grant select on table public.opening_stock_models to authenticated;
-grant select on table public.supplier_invoices to authenticated;
+grant select (
+  id, store_id, supplier_name, supplier_invoice_number, invoice_date,
+  currency, status, notes, created_by_user_id, created_by_membership_id,
+  created_by_display_name, closed_at, confirmed_at, confirmed_by_user_id,
+  confirmed_by_membership_id, confirmed_by_display_name, created_at, updated_at
+) on table public.supplier_invoices to authenticated;
 grant select (
   id, invoice_id, store_id, line_number, model_catalogue_id, device_model_id,
   quantity_invoiced, currency, notes, created_by_user_id,
@@ -2025,17 +2379,20 @@ revoke all on table public.opening_stock_invoice_lines_view from anon, authentic
 revoke all on table public.opening_stock_units_view from anon, authenticated, service_role;
 revoke all on table public.opening_stock_corrections_view from anon, authenticated, service_role;
 revoke all on table public.opening_stock_price_changes_view from anon, authenticated, service_role;
+revoke all on table public.opening_stock_invoice_reconciliation_view from anon, authenticated, service_role;
 grant select on table public.opening_stock_models_view to authenticated, service_role;
 grant select on table public.opening_stock_invoices_view to authenticated, service_role;
 grant select on table public.opening_stock_invoice_lines_view to authenticated, service_role;
 grant select on table public.opening_stock_units_view to authenticated, service_role;
 grant select on table public.opening_stock_corrections_view to authenticated, service_role;
 grant select on table public.opening_stock_price_changes_view to authenticated, service_role;
+grant select on table public.opening_stock_invoice_reconciliation_view to authenticated, service_role;
 
 revoke all on function public.register_opening_stock_model(uuid, text, integer, text) from public, anon, authenticated, service_role;
-revoke all on function public.create_supplier_invoice(uuid, text, text, date, text) from public, anon, authenticated, service_role;
+revoke all on function public.create_supplier_invoice(uuid, text, text, date, bigint, text) from public, anon, authenticated, service_role;
+revoke all on function public.confirm_supplier_invoice(uuid, bigint, integer, integer, bigint, boolean) from public, anon, authenticated, service_role;
 revoke all on function public.add_supplier_invoice_line(uuid, uuid, integer, bigint, text) from public, anon, authenticated, service_role;
-revoke all on function public.correct_supplier_invoice(uuid, text, text, date, text, text) from public, anon, authenticated, service_role;
+revoke all on function public.correct_supplier_invoice(uuid, text, text, date, bigint, text, text) from public, anon, authenticated, service_role;
 revoke all on function public.correct_supplier_invoice_line(uuid, integer, bigint, text) from public, anon, authenticated, service_role;
 revoke all on function public.receive_opening_stock_devices(uuid, jsonb) from public, anon, authenticated, service_role;
 revoke all on function public.receive_opening_stock_device(uuid, text, text, text, integer, jsonb) from public, anon, authenticated, service_role;
@@ -2043,16 +2400,17 @@ revoke all on function public.activate_opening_stock_unit(uuid, bigint, boolean)
 revoke all on function public.reprice_opening_stock_unit(uuid, bigint, bigint, text, boolean) from public, anon, authenticated, service_role;
 
 grant execute on function public.register_opening_stock_model(uuid, text, integer, text) to authenticated;
-grant execute on function public.create_supplier_invoice(uuid, text, text, date, text) to authenticated;
+grant execute on function public.create_supplier_invoice(uuid, text, text, date, bigint, text) to authenticated;
+grant execute on function public.confirm_supplier_invoice(uuid, bigint, integer, integer, bigint, boolean) to authenticated;
 grant execute on function public.add_supplier_invoice_line(uuid, uuid, integer, bigint, text) to authenticated;
-grant execute on function public.correct_supplier_invoice(uuid, text, text, date, text, text) to authenticated;
+grant execute on function public.correct_supplier_invoice(uuid, text, text, date, bigint, text, text) to authenticated;
 grant execute on function public.correct_supplier_invoice_line(uuid, integer, bigint, text) to authenticated;
 grant execute on function public.receive_opening_stock_devices(uuid, jsonb) to authenticated;
 grant execute on function public.receive_opening_stock_device(uuid, text, text, text, integer, jsonb) to authenticated;
 grant execute on function public.activate_opening_stock_unit(uuid, bigint, boolean) to authenticated;
 grant execute on function public.reprice_opening_stock_unit(uuid, bigint, bigint, text, boolean) to authenticated;
 
-comment on table public.supplier_invoices is 'Store-scoped supplier invoices for opening-stock intake.';
+comment on table public.supplier_invoices is 'Store-scoped supplier invoices with an optional reference and an integer-pesewa declared total.';
 comment on table public.supplier_invoice_lines is 'Invoice lines with manager-restricted integer-pesewa purchase cost.';
 comment on table public.opening_stock_models is 'Store registrations of the existing global device model catalogue.';
 comment on table public.opening_stock_units is 'Physically received, inspected, staged devices; no sellable inventory row exists until protected activation.';
@@ -2060,7 +2418,9 @@ comment on column public.opening_stock_units.unit_cost_pesewas is 'Manager-only 
 comment on column public.opening_stock_units.approved_price_pesewas is 'Approved sale price, set only by protected activation or repricing.';
 comment on table public.supplier_invoice_corrections is 'Append-only before/after invoice correction history with attributed actor and reason.';
 comment on table public.opening_stock_price_changes is 'Append-only approved sale-price changes for activated opening-stock units.';
-comment on view public.opening_stock_invoice_lines_view is 'Manager view with separate invoiced, received, staged, activated and outstanding quantities; purchase cost is permission-masked.';
+comment on view public.opening_stock_invoice_lines_view is 'Manager view with separate quantities and permission-masked purchase cost and line total.';
+comment on view public.opening_stock_invoice_reconciliation_view is 'Manager view with calculated line totals, declared invoice total, difference, and permission-masked confirmation state.';
+comment on function public.confirm_supplier_invoice(uuid, bigint, integer, integer, bigint, boolean) is 'Recomputes line totals under an invoice lock and records explicit manager confirmation only when they equal the stored declared total.';
 comment on function public.activate_opening_stock_unit(uuid, bigint, boolean) is 'Atomically promotes an inspected staged unit into existing sellable inventory after manager pricing approval.';
 comment on function public.reprice_opening_stock_unit(uuid, bigint, bigint, text, boolean) is 'Optimistically reprices one available activated unit with an audited, permission-checked price-change ledger.';
 

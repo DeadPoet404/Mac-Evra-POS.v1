@@ -8,9 +8,9 @@ Phases 1–5 provide the Supabase identity/RBAC foundation, persistent physical 
 
 Phase 6 adds one immutable, manually confirmed full payment per sale and atomic completion. The database derives the store, employee, membership, permissions, item price, total, and inventory state from trusted records; the browser supplies only the sale identifier, one supported method, optional reference metadata, and explicit receipt attestation. One transaction records payment, fulfils the reservation, marks inventory sold, appends a sold movement, completes the sale, and writes attributed audit events.
 
-Opening stock adds supplier invoices and invoice lines, store model registration, real-IMEI and inspection-validated individual/batch receiving, manager-only purchase costs, separate invoiced/received/staged/activated/outstanding quantities, audited invoice corrections, and protected activation/repricing. Received devices remain staged and non-sellable until a manager with pricing approval confirms a positive sale price; activation then atomically creates the physical device, available inventory row, intake movement, and attributed audit event.
+Opening stock adds optional-reference supplier invoices, integer-pesewa declared totals, calculated quantity × unit-cost line totals, explicit manager totals confirmation, store model registration, real-IMEI and inspection-validated individual/batch receiving, manager-only purchase costs, separate invoiced/received/staged/activated/outstanding quantities, audited invoice corrections, and protected activation/repricing. Batch receiving keeps colour, condition, battery health, and inspection attestation scoped to each physical device. The manager inventory register is now a live Supabase-backed view of actual available, reserved, and sold rows; opening-stock receiving remains at its own route. Received devices remain staged and non-sellable until a manager with pricing approval confirms a positive sale price; activation then atomically creates the physical device, available inventory row, intake movement, and attributed audit event.
 
-The employee route order is exactly IMEI → Payment → Customer details → Sale complete. Split/partial payments, gateways, automatic provider verification, refunds, reversals, receipts, trade-in settlement, supplier payments/reconciliation, and aggregate reporting remain excluded or later-phase functionality. Phases 4–6 and the opening-stock migration are prepared for review and have **not** been applied to hosted Supabase.
+The employee route order is exactly IMEI → Payment → Customer details → Sale complete. Split/partial payments, gateways, automatic provider verification, refunds, reversals, receipts, trade-in settlement, supplier payments/accounts payable, external statement reconciliation, and aggregate reporting remain excluded or later-phase functionality. Declared invoice-total reconciliation inside the staged intake workflow is included and is distinct from supplier-payment reconciliation. Phases 4–6 and the opening-stock migration are prepared for review and have **not** been applied to hosted Supabase.
 
 ### Employee routes
 
@@ -30,10 +30,10 @@ The employee route order is exactly IMEI → Payment → Customer details → Sa
 
 | Route | Purpose |
 | --- | --- |
-| `/manager` | Store overview and attention queue |
+| `/manager` | Live inventory summary and watch; preview sales/chart/approvals/activity |
 | `/manager/sales` | Real store-scoped sale drafts, items, customers, totals, and employee attribution |
-| `/manager/inventory` | Demonstration IMEI-level register |
-| `/manager/opening-stock` | Supplier invoices, staged receiving, cost-controlled reconciliation, activation, and repricing |
+| `/manager/inventory` | Real RLS-scoped IMEI-level register with available, reserved, and sold inventory |
+| `/manager/opening-stock` | Optional-reference supplier invoices, declared-total reconciliation, per-device staged receiving, activation, and repricing |
 | `/manager/employees` | Preview profiles, roles, and permissions |
 | `/manager/approvals` | Preview sensitive-action requests |
 | `/manager/reports` | Demonstration reporting |
@@ -67,11 +67,13 @@ Backend files:
 - `supabase/tests/004_employee_management.test.sql` — pgTAP employee access-management tests
 - `supabase/tests/005_sales_customers.test.sql` — pgTAP customer, sale, reservation, isolation, total, discount, cancellation, and audit tests
 - `supabase/tests/006_manual_payments.test.sql` — pgTAP manual payment, completion, isolation, fulfilment, immutability, and audit tests
-- `supabase/tests/007_opening_stock_intake.test.sql` — pgTAP staged intake, cost masking, quantity reconciliation, corrections, activation, repricing, isolation, immutability, and audit tests
+- `supabase/tests/007_opening_stock_intake.test.sql` — pgTAP staged intake, optional invoice references, declared/calculated totals, reconciliation confirmation, per-device batches, cost masking, quantity controls, corrections, activation, repricing, isolation, immutability, and audit tests
+- `tests/opening-stock-review-findings.test.mjs` — regression tests for live manager inventory, declared-total reconciliation, optional references, and device-scoped batch receiving
+- `src/lib/inventory-status.ts` — client-safe status labels and available/reserved/sold summaries for live manager inventory
 - `scripts/test-inventory-concurrency.mjs` — local-only two-client reservation contention test
 - `scripts/test-sales-concurrency.mjs` — local-only competing sale-draft reservation/item test
 - `scripts/test-payment-concurrency.mjs` — local-only duplicate payment-confirmation race test
-- `scripts/test-opening-stock-concurrency.mjs` — local-only duplicate IMEI receipt, concurrent activation, and stale repricing race test
+- `scripts/test-opening-stock-concurrency.mjs` — local-only optional-reference invoice-total confirmation, device-specific atomic batch, duplicate IMEI receipt, concurrent activation, and stale repricing race test
 - `scripts/test-auth-concurrency.mjs` — deterministic local invitation-acceptance versus profile-suspension lock test
 - `scripts/test-auth-sessions.mjs` — local-only email/password, actual captured invitation email, SSR confirmation, password setup, existing-account, and separate-session access test
 - `supabase/templates/` — direct invite and magic-link templates that preserve the complete invitation-specific confirmation parameters
@@ -80,7 +82,7 @@ Backend files:
 - `src/lib/supabase/client.ts` — browser client
 - `src/lib/supabase/server.ts` — cookie-aware Server Component/server-action client
 - `src/lib/supabase/admin.ts` — server-only Auth Admin client
-- `src/lib/inventory-server.ts` — authenticated server-only inventory reads and reservation RPC wrappers
+- `src/lib/inventory-server.ts` — authenticated server-only inventory reads and reservation RPC wrappers; used by employee inventory, manager inventory, and manager dashboard live inventory views
 - `src/lib/supabase/proxy.ts` and `src/proxy.ts` — Next.js 16 session refresh and route enforcement
 
 See `docs/supabase-foundation.md`, `docs/inventory-phase-2.md`, `docs/employee-auth-phase-3.md`, `docs/sales-phase-5.md`, `docs/manual-payments-phase-6.md`, and `docs/opening-stock-intake.md` for security, transaction, deployment, and operational boundaries.
@@ -203,7 +205,12 @@ The database commands require the disposable local Supabase Docker stack. CI reb
 - Manual payment rows are one-per-sale, forced-RLS protected, append-only, and readable only by the sale employee or an authorised same-store manager.
 - A payment reference remains optional employee-entered metadata and is never represented as provider verification.
 - The completion route queries persisted sale and payment state and rejects draft, awaiting-payment, cancelled, missing, inaccessible, and payment-less records as success.
+- `/manager/inventory` is a server component that reads only the authenticated store-scoped `listAuthorizedInventory` loader; it shows actual available, reserved, and sold rows and never presents browser-only sample devices as inventory.
 - Opening-stock tables are forced-RLS protected and deny direct authenticated writes; every workflow write uses a fixed-search-path `SECURITY DEFINER` RPC that derives actor, store, membership, status, and timestamps from trusted context.
+- Supplier invoice number/reference is optional. A nonblank reference is validated; multiple invoices with no reference are allowed.
+- Supplier invoice declared totals are stored in integer pesewas. A stored generated line total equals quantity × unit cost, and the reconciliation view shows every line total, the declared total, the calculated total, and the difference before explicit confirmation. The confirmation RPC recomputes totals under an invoice lock; later line or invoice corrections clear confirmation.
+- Declared totals, calculated totals, and line totals use the same permission-masked cost visibility as unit costs and are never granted as raw columns.
+- Batch receiving requires a separate colour, condition, battery health, and complete structured inspection attestation for every numbered IMEI; there is no shared field fallback and the whole batch commits or rolls back together.
 - Staged opening-stock units never enter `store_inventory` or the reservation lifecycle until protected activation with explicit pricing approval.
 - Real IMEIs require 15 digits, a valid Luhn check digit, and rejection of known placeholders; every received unit requires a complete passing structured inspection.
 - Purchase-cost columns are never granted to authenticated users. Permission-masked views and private helpers return cost only to active same-store members with `access_manager_workspace` and `manage_inventory`.

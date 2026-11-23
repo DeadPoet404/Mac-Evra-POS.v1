@@ -1,6 +1,7 @@
 import {
   Archive,
   Boxes,
+  Calculator,
   CircleAlert,
   ClipboardCheck,
   FileText,
@@ -19,13 +20,18 @@ import { requirePermissions } from "@/lib/auth/server"
 import {
   canViewPurchaseCost,
   openingStockConditions,
+  openingStockInspectionChecks,
+  summarizeOpeningStockInvoiceReconciliation,
   summarizeOpeningStockQuantities,
 } from "@/lib/opening-stock"
+import type { OpeningStockInvoice } from "@/lib/opening-stock-server"
 import { loadOpeningStockDashboard } from "@/lib/opening-stock-server"
 import { formatPesewas, pesewasToGhsInput } from "@/lib/sales"
+import { BatchReceivingForm } from "./batch-receiving-form"
 import {
   activateOpeningStockUnitAction,
   addSupplierInvoiceLineAction,
+  confirmSupplierInvoiceAction,
   correctSupplierInvoiceAction,
   correctSupplierInvoiceLineAction,
   createSupplierInvoiceAction,
@@ -44,6 +50,7 @@ const notices = new Map([
   ["model-registered", "Model registration saved."],
   ["invoice-created", "Supplier invoice created."],
   ["invoice-line-added", "Invoice line added."],
+  ["invoice-confirmed", "Declared invoice total reconciled and confirmed."],
   ["invoice-corrected", "Invoice correction recorded and audited."],
   ["invoice-line-corrected", "Invoice-line correction recorded and audited."],
   ["device-received", "Physical device received and staged."],
@@ -53,10 +60,10 @@ const notices = new Map([
 ])
 
 const errors = new Map([
-  ["invalid-input", "Check every required field. IMEIs must be real Luhn-valid identifiers and all inspection checks must pass."],
+  ["invalid-input", "Check every required field. IMEIs must be real Luhn-valid identifiers and every device must have its own complete inspection."],
   ["duplicate-or-race", "A duplicate IMEI, duplicate state change, or concurrent retry was rejected. No partial records were saved."],
   ["access-denied", "Your active store permissions do not allow this operation."],
-  ["state-conflict", "The record changed or is not in the required state. Reload the page and verify quantities, price, and status."],
+  ["state-conflict", "The record changed or is not in the required state. Reload the page and verify quantities, totals, price, and status."],
   ["operation-failed", "The operation could not be completed. No partial workflow records were saved."],
 ])
 
@@ -83,42 +90,25 @@ function FormSection({
 }
 
 function InspectionChecks() {
-  const checks = [
-    ["imeiConfirmed", "Physical IMEI matches the device"],
-    ["labelsMatch", "Model and storage labels match"],
-    ["displayPassed", "Display and touch pass"],
-    ["camerasPassed", "Cameras pass"],
-    ["buttonsPassed", "Buttons and housing pass"],
-    ["connectivityPassed", "Connectivity and charging pass"],
-    ["chargingPortPassed", "Ports and speakers pass"],
-    ["activationLockCleared", "Activation Lock is cleared"],
-  ]
   return (
     <div className="grid gap-2 sm:grid-cols-2">
-      {checks.map(([name, label]) => (
-        <label key={name} className="flex items-start gap-2 rounded-xl bg-[#FAFAFB] p-3 text-xs leading-5 text-[#424245]">
-          <input type="checkbox" name={name} required className="mt-0.5 size-4 accent-[#6E0728]" />
-          <span>{label}</span>
+      {openingStockInspectionChecks.map((check) => (
+        <label key={check.name} className="flex items-start gap-2 rounded-xl bg-[#FAFAFB] p-3 text-xs leading-5 text-[#424245]">
+          <input type="checkbox" name={check.name} required className="mt-0.5 size-4 accent-[#6E0728]" />
+          <span>{check.label}</span>
         </label>
       ))}
     </div>
   )
 }
 
-function DeviceFields({ batch = false }: { batch?: boolean }) {
+function DeviceFields() {
   return (
     <>
-      {batch ? (
-        <label className={`${labelClass} sm:col-span-2`}>
-          <span>Batch IMEIs · one per line, up to 100</span>
-          <textarea name="imeiBatch" required rows={5} placeholder="357000000000017&#10;357000000000025" className="w-full rounded-lg border border-input bg-white p-3 font-mono text-xs outline-none focus:border-[#6E0728]" />
-        </label>
-      ) : (
-        <label className={labelClass}>
-          <span>IMEI · 15 digits</span>
-          <input name="imei" required inputMode="numeric" maxLength={20} placeholder="357000000000017" className={inputClass} />
-        </label>
-      )}
+      <label className={labelClass}>
+        <span>IMEI · 15 digits</span>
+        <input name="imei" required inputMode="numeric" maxLength={20} placeholder="357000000000017" className={inputClass} />
+      </label>
       <label className={labelClass}>
         <span>Colour</span>
         <input name="colour" required maxLength={60} placeholder="Natural Titanium" className={inputClass} />
@@ -159,6 +149,21 @@ function JsonState({ label, value }: { label: string; value: Record<string, unkn
   )
 }
 
+function invoiceLabel(invoice: OpeningStockInvoice | undefined, fallbackId?: string) {
+  if (!invoice) return fallbackId ? `Invoice ${fallbackId.slice(0, 8)}` : "No reference"
+  return invoice.supplierInvoiceNumber
+    ? `${invoice.supplierInvoiceNumber} · ${invoice.supplierName}`
+    : `${invoice.supplierName} · ${invoice.invoiceDate} · no reference`
+}
+
+function dateTime(value: string) {
+  return new Intl.DateTimeFormat("en-GH", {
+    dateStyle: "medium",
+    timeStyle: "short",
+    timeZone: "Africa/Accra",
+  }).format(new Date(value))
+}
+
 export default async function OpeningStockPage({
   searchParams,
 }: {
@@ -177,6 +182,13 @@ export default async function OpeningStockPage({
   const firstLine = dashboard.lines[0]
   const notice = params.notice ? notices.get(params.notice) : undefined
   const error = params.error ? errors.get(params.error) ?? errors.get("operation-failed") : undefined
+  const lineOptions = dashboard.lines.map((line) => {
+    const invoice = dashboard.invoices.find((item) => item.id === line.invoiceId)
+    return {
+      id: line.id,
+      label: `${invoiceLabel(invoice, line.invoiceId)} · line ${line.lineNumber} · ${line.modelName} · ${line.quantityOutstanding} outstanding`,
+    }
+  })
 
   return (
     <main className="mx-auto w-full max-w-[1500px] space-y-7 p-4 sm:p-6 lg:p-8">
@@ -215,18 +227,19 @@ export default async function OpeningStockPage({
                 <Button type="submit" className={buttonClass}>Register model</Button>
               </form>
             </FormSection>
-            <FormSection title="2 · Create a supplier invoice" description="Invoice identity, date, and notes are persisted in the store ledger.">
+            <FormSection title="2 · Create a supplier invoice" description="The invoice reference is optional; the declared total is stored in integer pesewas.">
               <form action={createSupplierInvoiceAction} className="grid gap-3 sm:grid-cols-2">
                 <label className={labelClass}><span>Supplier</span><input name="supplierName" required maxLength={160} placeholder="Approved supplier" className={inputClass} /></label>
-                <label className={labelClass}><span>Supplier invoice number</span><input name="invoiceNumber" required maxLength={80} placeholder="SUP-2026-001" className={inputClass} /></label>
+                <label className={labelClass}><span>Invoice number / reference · optional</span><input name="invoiceNumber" maxLength={80} placeholder="Leave blank if not supplied" className={inputClass} /></label>
                 <label className={labelClass}><span>Invoice date</span><input name="invoiceDate" required type="date" max={today} defaultValue={today} className={inputClass} /></label>
-                <label className={labelClass}><span>Notes · optional</span><input name="notes" maxLength={1000} className={inputClass} /></label>
+                <label className={labelClass}><span>Declared invoice total · GH₵</span><input name="declaredTotalGhs" required inputMode="decimal" placeholder="0.00" className={inputClass} /></label>
+                <label className={`${labelClass} sm:col-span-2`}><span>Notes · optional</span><input name="notes" maxLength={1000} className={inputClass} /></label>
                 <Button type="submit" className={`${buttonClass} sm:col-span-2`}>Create invoice</Button>
               </form>
             </FormSection>
-            <FormSection title="3 · Add an invoice line" description="Purchase cost is stored in integer pesewas and is visible only to authorized managers.">
+            <FormSection title="3 · Add an invoice line" description="Purchase cost is stored in integer pesewas; each line total is calculated from quantity × unit cost.">
               <form action={addSupplierInvoiceLineAction} className="grid gap-3 sm:grid-cols-2">
-                <label className={labelClass}><span>Invoice</span><select name="invoiceId" required disabled={!dashboard.invoices.length} className={inputClass}>{dashboard.invoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.supplierInvoiceNumber} · {invoice.supplierName}</option>)}</select></label>
+                <label className={labelClass}><span>Invoice</span><select name="invoiceId" required disabled={!dashboard.invoices.length} className={inputClass}>{dashboard.invoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoiceLabel(invoice)}</option>)}</select></label>
                 <label className={labelClass}><span>Registered model</span><select name="modelCatalogueId" required disabled={!dashboard.models.length} className={inputClass}>{dashboard.models.map((model) => <option key={model.id} value={model.id}>{model.modelName} · {model.storageGb}GB</option>)}</select></label>
                 <label className={labelClass}><span>Quantity invoiced</span><input name="quantityInvoiced" required type="number" min={1} max={1000} defaultValue={1} className={inputClass} /></label>
                 <label className={labelClass}><span>Unit purchase cost · GH₵</span><input name="unitCostGhs" required inputMode="decimal" placeholder="0.00" className={inputClass} /></label>
@@ -243,21 +256,19 @@ export default async function OpeningStockPage({
             <p className="text-xs leading-5 text-[#86868B]">Every correction records before/after state, a meaningful reason, and the active manager membership. A line cost cannot be changed after any physical device is received.</p>
             <FormSection title="Correct invoice identity" description="Re-enter the complete corrected invoice values and explain the supplier-document discrepancy.">
               <form action={correctSupplierInvoiceAction} className="grid gap-3 sm:grid-cols-2">
-                <label className={`${labelClass} sm:col-span-2`}><span>Invoice</span><select name="invoiceId" required disabled={!dashboard.invoices.length} className={inputClass}>{dashboard.invoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoice.supplierInvoiceNumber}</option>)}</select></label>
+                <label className={`${labelClass} sm:col-span-2`}><span>Invoice</span><select name="invoiceId" required disabled={!dashboard.invoices.length} className={inputClass}>{dashboard.invoices.map((invoice) => <option key={invoice.id} value={invoice.id}>{invoiceLabel(invoice)}</option>)}</select></label>
                 <label className={labelClass}><span>Corrected supplier</span><input name="supplierName" required defaultValue={firstInvoice?.supplierName ?? ""} maxLength={160} className={inputClass} /></label>
-                <label className={labelClass}><span>Corrected number</span><input name="invoiceNumber" required defaultValue={firstInvoice?.supplierInvoiceNumber ?? ""} maxLength={80} className={inputClass} /></label>
+                <label className={labelClass}><span>Corrected number / reference · optional</span><input name="invoiceNumber" defaultValue={firstInvoice?.supplierInvoiceNumber ?? ""} maxLength={80} className={inputClass} /></label>
                 <label className={labelClass}><span>Corrected date</span><input name="invoiceDate" required type="date" max={today} defaultValue={firstInvoice?.invoiceDate ?? today} className={inputClass} /></label>
-                <label className={labelClass}><span>Corrected notes</span><input name="notes" defaultValue={firstInvoice?.notes ?? ""} maxLength={1000} className={inputClass} /></label>
+                <label className={labelClass}><span>Corrected declared total · GH₵</span><input name="declaredTotalGhs" required inputMode="decimal" defaultValue={firstInvoice?.declaredTotalPesewas ? pesewasToGhsInput(firstInvoice.declaredTotalPesewas) : ""} className={inputClass} /></label>
+                <label className={`${labelClass} sm:col-span-2`}><span>Corrected notes</span><input name="notes" defaultValue={firstInvoice?.notes ?? ""} maxLength={1000} className={inputClass} /></label>
                 <label className={`${labelClass} sm:col-span-2`}><span>Reason</span><input name="reason" required minLength={5} maxLength={500} placeholder="Supplier reissued invoice with corrected date" className={inputClass} /></label>
                 <Button type="submit" disabled={!dashboard.invoices.length} className={`${buttonClass} sm:col-span-2`}>Record invoice correction</Button>
               </form>
             </FormSection>
             <FormSection title="Correct invoice-line quantity or cost" description="Quantity cannot drop below received units; cost changes are rejected after receipt preserves immutable stock cost.">
               <form action={correctSupplierInvoiceLineAction} className="grid gap-3 sm:grid-cols-2">
-                <label className={`${labelClass} sm:col-span-2`}><span>Invoice line</span><select name="lineId" required disabled={!dashboard.lines.length} className={inputClass}>{dashboard.lines.map((line) => {
-                  const invoice = dashboard.invoices.find((item) => item.id === line.invoiceId)
-                  return <option key={line.id} value={line.id}>{invoice?.supplierInvoiceNumber ?? line.invoiceId.slice(0, 8)} · line {line.lineNumber} · {line.modelName}</option>
-                })}</select></label>
+                <label className={`${labelClass} sm:col-span-2`}><span>Invoice line</span><select name="lineId" required disabled={!dashboard.lines.length} className={inputClass}>{dashboard.lines.map((line) => <option key={line.id} value={line.id}>{lineOptions.find((option) => option.id === line.id)?.label}</option>)}</select></label>
                 <label className={labelClass}><span>Corrected quantity</span><input name="quantityInvoiced" required type="number" min={1} max={1000} defaultValue={firstLine?.quantityInvoiced ?? 1} className={inputClass} /></label>
                 <label className={labelClass}><span>Corrected unit cost · GH₵</span><input name="unitCostGhs" required inputMode="decimal" defaultValue={firstLine?.unitCostPesewas ? pesewasToGhsInput(firstLine.unitCostPesewas) : ""} className={inputClass} /></label>
                 <label className={`${labelClass} sm:col-span-2`}><span>Reason</span><input name="reason" required minLength={5} maxLength={500} placeholder="Supplier amended quantity before delivery" className={inputClass} /></label>
@@ -270,20 +281,117 @@ export default async function OpeningStockPage({
 
       <Card className="rounded-2xl border-[#E8E8ED] bg-white shadow-none">
         <CardContent className="space-y-4 p-5">
+          <div className="flex items-center gap-3"><Calculator size={18} className="text-[#6E0728]" /><h2 className="font-semibold">Declared invoice total reconciliation</h2></div>
+          <p className="text-xs leading-5 text-[#86868B]">Line totals are calculated from persisted quantity × unit cost. Compare every line total and the calculated invoice total with the declared total before confirming; the confirmation RPC recomputes and locks the invoice.</p>
+          {dashboard.reconciliations.length ? (
+            <div className="space-y-4">
+              {dashboard.reconciliations.map((reconciliation) => {
+                const invoice = dashboard.invoices.find((item) => item.id === reconciliation.invoiceId)
+                const invoiceLines = dashboard.lines.filter((line) => line.invoiceId === reconciliation.invoiceId)
+                const declaredTotal = reconciliation.declaredTotalPesewas
+                let verification: ReturnType<typeof summarizeOpeningStockInvoiceReconciliation> | null = null
+                let verificationError = ""
+                if (declaredTotal !== null) {
+                  try {
+                    verification = summarizeOpeningStockInvoiceReconciliation(
+                      invoiceLines.map((line) => ({
+                        quantityInvoiced: line.quantityInvoiced,
+                        unitCostPesewas: line.unitCostPesewas,
+                        lineTotalPesewas: line.lineTotalPesewas,
+                        costVisible: line.costVisible,
+                      })),
+                      declaredTotal
+                    )
+                  } catch (caught) {
+                    verificationError = caught instanceof Error ? caught.message : "Invoice totals could not be verified."
+                  }
+                }
+                const canConfirm = Boolean(
+                  reconciliation.costVisible &&
+                  reconciliation.reconciled &&
+                  verification?.reconciled &&
+                  verification.lineCount === reconciliation.lineCount &&
+                  verification.quantityInvoiced === reconciliation.quantityInvoiced &&
+                  declaredTotal !== null &&
+                  reconciliation.calculatedTotalPesewas !== null &&
+                  !reconciliation.confirmedAt
+                )
+
+                return (
+                  <div key={reconciliation.invoiceId} className="rounded-2xl border border-[#ECECEF] p-4">
+                    <div className="flex flex-wrap items-start justify-between gap-3">
+                      <div>
+                        <h3 className="text-sm font-semibold">{invoiceLabel(invoice, reconciliation.invoiceId)}</h3>
+                        <p className="mt-1 text-xs text-[#86868B]">{reconciliation.lineCount} line{reconciliation.lineCount === 1 ? "" : "s"} · {reconciliation.quantityInvoiced} invoiced unit{reconciliation.quantityInvoiced === 1 ? "" : "s"}</p>
+                      </div>
+                      <DataBadge tone={reconciliation.confirmedAt ? "green" : reconciliation.reconciled ? "blue" : "amber"}>
+                        {reconciliation.confirmedAt ? "Totals confirmed" : reconciliation.reconciled ? "Reconciled" : "Not reconciled"}
+                      </DataBadge>
+                    </div>
+                    <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                      <Total label="Declared total" visible={reconciliation.costVisible} value={reconciliation.declaredTotalPesewas} />
+                      <Total label="Calculated from lines" visible={reconciliation.costVisible} value={reconciliation.calculatedTotalPesewas} />
+                      <Total label="Difference" visible={reconciliation.costVisible} value={reconciliation.differencePesewas} />
+                      <div className="rounded-xl bg-[#F7F7F8] p-3">
+                        <p className="text-xs text-[#86868B]">Confirmation</p>
+                        <p className="mt-1 text-sm font-medium">{reconciliation.confirmedAt ? dateTime(reconciliation.confirmedAt) : "Not yet confirmed"}</p>
+                        {reconciliation.confirmedByDisplayName ? <p className="mt-1 text-xs text-[#86868B]">By {reconciliation.confirmedByDisplayName}</p> : null}
+                      </div>
+                    </div>
+                    <div className="mt-4 overflow-x-auto">
+                      <table className="w-full min-w-[720px] text-left text-sm">
+                        <thead className="bg-[#FAFAFB] text-[11px] font-semibold uppercase tracking-wide text-[#86868B]">
+                          <tr><th className="px-4 py-3">Line</th><th className="px-4 py-3">Model</th><th className="px-4 py-3">Quantity</th><th className="px-4 py-3">Unit cost</th><th className="px-4 py-3">Line total</th></tr>
+                        </thead>
+                        <tbody>
+                          {invoiceLines.map((line) => (
+                            <tr key={line.id} className="border-t border-[#F0F0F2]">
+                              <td className="px-4 py-3">{line.lineNumber}</td>
+                              <td className="px-4 py-3">{line.modelName} · {line.storageGb}GB</td>
+                              <td className="px-4 py-3">{line.quantityInvoiced}</td>
+                              <td className="px-4 py-3"><CostValue visible={line.costVisible} value={line.unitCostPesewas} /></td>
+                              <td className="px-4 py-3"><CostValue visible={line.costVisible} value={line.lineTotalPesewas} /></td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      {!invoiceLines.length ? <p className="mt-3 text-xs text-[#86868B]">No invoice lines yet. Add lines and verify their totals before confirmation.</p> : null}
+                    </div>
+                    {verificationError ? <p role="alert" className="mt-3 rounded-lg bg-[#FFF3F2] p-3 text-xs text-[#A13B34]">{verificationError}</p> : null}
+                    {!reconciliation.confirmedAt ? (
+                      <form action={confirmSupplierInvoiceAction} className="mt-4 grid gap-3 rounded-xl bg-[#FAFAFB] p-4 sm:grid-cols-[1fr_auto] sm:items-end">
+                        <input type="hidden" name="invoiceId" value={reconciliation.invoiceId} />
+                        <input type="hidden" name="expectedDeclaredTotalPesewas" value={declaredTotal ?? ""} />
+                        <input type="hidden" name="expectedLineCount" value={reconciliation.lineCount} />
+                        <input type="hidden" name="expectedQuantityInvoiced" value={reconciliation.quantityInvoiced} />
+                        <input type="hidden" name="expectedCalculatedTotalPesewas" value={reconciliation.calculatedTotalPesewas ?? ""} />
+                        <label className="flex items-center gap-2 text-xs leading-5 text-[#424245]">
+                          <input type="checkbox" name="totalsConfirmed" required className="size-4 accent-[#6E0728]" /> I verified every line total and the declared invoice total.
+                        </label>
+                        <Button type="submit" disabled={!canConfirm} className={`${buttonClass} disabled:opacity-50`}>Confirm invoice totals</Button>
+                      </form>
+                    ) : (
+                      <p className="mt-4 rounded-xl border border-[#CDE9D7] bg-[#F0FAF3] p-3 text-xs leading-5 text-[#267343]">This invoice has a recorded totals confirmation. Any audited line or invoice correction clears confirmation and requires a fresh review.</p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          ) : <EmptyState title="No invoices" description="Create a supplier invoice and add its lines to begin declared-total reconciliation." />}
+        </CardContent>
+      </Card>
+
+      <Card className="rounded-2xl border-[#E8E8ED] bg-white shadow-none">
+        <CardContent className="space-y-4 p-5">
           <div className="flex items-center gap-3"><ClipboardCheck size={18} className="text-[#6E0728]" /><h2 className="font-semibold">Physical receiving</h2></div>
           <div className="grid gap-4 lg:grid-cols-2">
             <form action={receiveOpeningStockDeviceAction} className="space-y-3 rounded-2xl bg-[#FAFAFB] p-4">
               <h3 className="text-sm font-semibold">Receive one device</h3>
-              <label className={labelClass}><span>Invoice line</span><select name="lineId" required disabled={!dashboard.lines.length} className={inputClass}>{dashboard.lines.map((line) => <option key={line.id} value={line.id}>Line {line.lineNumber} · {line.modelName} · {line.quantityOutstanding} outstanding</option>)}</select></label>
+              <label className={labelClass}><span>Invoice line</span><select name="lineId" required disabled={!lineOptions.length} className={inputClass}>{lineOptions.map((line) => <option key={line.id} value={line.id}>{line.label}</option>)}</select></label>
               <div className="grid gap-3 sm:grid-cols-2"><DeviceFields /></div>
-              <Button type="submit" disabled={!dashboard.lines.length} className={buttonClass}>Receive and stage</Button>
+              <Button type="submit" disabled={!lineOptions.length} className={buttonClass}>Receive and stage</Button>
             </form>
-            <form action={receiveOpeningStockBatchAction} className="space-y-3 rounded-2xl bg-[#FAFAFB] p-4">
-              <h3 className="text-sm font-semibold">Receive a batch</h3>
-              <label className={labelClass}><span>Invoice line</span><select name="lineId" required disabled={!dashboard.lines.length} className={inputClass}>{dashboard.lines.map((line) => <option key={line.id} value={line.id}>Line {line.lineNumber} · {line.modelName} · {line.quantityOutstanding} outstanding</option>)}</select></label>
-              <div className="grid gap-3 sm:grid-cols-2"><DeviceFields batch /></div>
-              <Button type="submit" disabled={!dashboard.lines.length} className={buttonClass}>Receive batch atomically</Button>
-            </form>
+            <BatchReceivingForm action={receiveOpeningStockBatchAction} lines={lineOptions} />
           </div>
         </CardContent>
       </Card>
@@ -293,21 +401,22 @@ export default async function OpeningStockPage({
           <CardContent className="p-0">
             <div className="border-b border-[#E8E8ED] p-5">
               <h2 className="font-semibold">Invoice-line reconciliation</h2>
-              <p className="mt-1 text-xs text-[#86868B]">Invoiced, received, staged, activated, and outstanding are independent persisted quantities.</p>
+              <p className="mt-1 text-xs text-[#86868B]">Invoiced, received, staged, activated, and outstanding are independent persisted quantities; line totals are permission-masked.</p>
             </div>
             {dashboard.lines.length ? (
               <div className="overflow-x-auto">
-                <table className="w-full min-w-[950px] text-left text-sm">
+                <table className="w-full min-w-[1050px] text-left text-sm">
                   <thead className="bg-[#FAFAFB] text-[11px] font-semibold uppercase tracking-wide text-[#86868B]">
-                    <tr><th className="px-5 py-3">Invoice / model</th><th className="px-3 py-3">Purchase cost</th><th className="px-3 py-3">Invoiced</th><th className="px-3 py-3">Received</th><th className="px-3 py-3">Staged</th><th className="px-3 py-3">Activated</th><th className="px-5 py-3">Outstanding</th></tr>
+                    <tr><th className="px-5 py-3">Invoice / model</th><th className="px-3 py-3">Purchase cost</th><th className="px-3 py-3">Line total</th><th className="px-3 py-3">Invoiced</th><th className="px-3 py-3">Received</th><th className="px-3 py-3">Staged</th><th className="px-3 py-3">Activated</th><th className="px-5 py-3">Outstanding</th></tr>
                   </thead>
                   <tbody>
                     {dashboard.lines.map((line) => {
                       const invoice = dashboard.invoices.find((item) => item.id === line.invoiceId)
                       return (
                         <tr key={line.id} className="border-t border-[#F0F0F2]">
-                          <td className="px-5 py-4"><p className="font-medium">{invoice?.supplierInvoiceNumber ?? line.invoiceId.slice(0, 8)}</p><p className="mt-1 text-xs text-[#86868B]">Line {line.lineNumber} · {line.modelName} · {line.storageGb}GB</p></td>
+                          <td className="px-5 py-4"><p className="font-medium">{invoiceLabel(invoice, line.invoiceId)}</p><p className="mt-1 text-xs text-[#86868B]">Line {line.lineNumber} · {line.modelName} · {line.storageGb}GB</p></td>
                           <td className="px-3 py-4"><CostValue visible={line.costVisible} value={line.unitCostPesewas} /></td>
+                          <td className="px-3 py-4"><CostValue visible={line.costVisible} value={line.lineTotalPesewas} /></td>
                           <td className="px-3 py-4 font-semibold">{line.quantityInvoiced}</td>
                           <td className="px-3 py-4">{line.quantityReceived}</td>
                           <td className="px-3 py-4">{line.quantityStaged}</td>
@@ -328,8 +437,8 @@ export default async function OpeningStockPage({
             <div className="flex items-center gap-3"><LockKeyhole size={18} className="text-[#6E0728]" /><h2 className="font-semibold">Cost visibility</h2></div>
             <p className="text-xs leading-5 text-[#86868B]">
               {costVisible
-                ? "Purchase cost is visible because this active membership has manager workspace and manage-inventory permission."
-                : "Purchase cost is restricted for this membership. The database returns null through permission-checked views."}
+                ? "Purchase cost, line totals, and invoice totals are visible because this active membership has manager workspace and manage-inventory permission."
+                : "Purchase cost and calculated totals are restricted for this membership. The database returns null through permission-checked views."}
             </p>
             <div className="rounded-xl bg-[#FAFAFB] p-4 text-xs leading-6 text-[#424245]">
               <p><span className="font-semibold">Models:</span> {dashboard.models.length}</p>
@@ -396,7 +505,7 @@ export default async function OpeningStockPage({
             <div className="flex items-center gap-3"><Archive size={18} className="text-[#6E0728]" /><h2 className="font-semibold">Correction history</h2></div>
             {dashboard.corrections.length ? dashboard.corrections.map((correction) => (
               <div key={correction.id} className="space-y-2 rounded-xl bg-[#FAFAFB] p-4">
-                <div className="flex items-center justify-between gap-3"><DataBadge tone="burgundy">{correction.entityType.replace("_", " ")}</DataBadge><span className="text-xs text-[#86868B]">{new Intl.DateTimeFormat("en-GH", { dateStyle: "medium", timeStyle: "short", timeZone: "Africa/Accra" }).format(new Date(correction.createdAt))}</span></div>
+                <div className="flex items-center justify-between gap-3"><DataBadge tone="burgundy">{correction.entityType.replace("_", " ")}</DataBadge><span className="text-xs text-[#86868B]">{dateTime(correction.createdAt)}</span></div>
                 <p className="text-xs text-[#424245]"><span className="font-semibold">{correction.actorDisplayName}:</span> {correction.reason}</p>
                 {costVisible ? <div className="grid gap-2 sm:grid-cols-2"><JsonState label="Before" value={correction.beforeData} /><JsonState label="After" value={correction.afterData} /></div> : null}
               </div>
@@ -409,7 +518,7 @@ export default async function OpeningStockPage({
             {dashboard.priceChanges.length ? dashboard.priceChanges.map((change) => (
               <div key={change.id} className="rounded-xl bg-[#FAFAFB] p-4">
                 <p className="text-sm font-medium">{formatPesewas(change.oldPricePesewas)} → {formatPesewas(change.newPricePesewas)}</p>
-                <p className="mt-1 text-xs text-[#86868B]">{change.actorDisplayName} · {new Intl.DateTimeFormat("en-GH", { dateStyle: "medium", timeStyle: "short", timeZone: "Africa/Accra" }).format(new Date(change.createdAt))}</p>
+                <p className="mt-1 text-xs text-[#86868B]">{change.actorDisplayName} · {dateTime(change.createdAt)}</p>
                 <p className="mt-2 text-xs text-[#424245]">{change.reason}</p>
               </div>
             )) : <p className="text-sm text-[#86868B]">No approved repricing records yet.</p>}
@@ -417,5 +526,14 @@ export default async function OpeningStockPage({
         </Card>
       </section>
     </main>
+  )
+}
+
+function Total({ label, visible, value }: { label: string; visible: boolean; value: number | null }) {
+  return (
+    <div className="rounded-xl bg-[#F7F7F8] p-3">
+      <p className="text-xs text-[#86868B]">{label}</p>
+      <p className="mt-1 text-sm"><CostValue visible={visible} value={value} /></p>
+    </div>
   )
 }

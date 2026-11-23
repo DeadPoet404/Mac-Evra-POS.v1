@@ -52,7 +52,9 @@ values
   ('valid', '{"imei_confirmed_physical":true,"identity_labels_match":true,"display_passed":true,"cameras_passed":true,"buttons_passed":true,"connectivity_passed":true,"charging_port_passed":true,"activation_lock_cleared":true,"notes":"Supplier sealed box"}'::jsonb),
   ('failed_camera', '{"imei_confirmed_physical":true,"identity_labels_match":true,"display_passed":true,"cameras_passed":false,"buttons_passed":true,"connectivity_passed":true,"charging_port_passed":true,"activation_lock_cleared":true,"notes":"Camera fault"}'::jsonb),
   ('extra_key', '{"imei_confirmed_physical":true,"identity_labels_match":true,"display_passed":true,"cameras_passed":true,"buttons_passed":true,"connectivity_passed":true,"charging_port_passed":true,"activation_lock_cleared":true,"notes":"Valid","unexpected":true}'::jsonb),
-  ('control_note', '{"imei_confirmed_physical":true,"identity_labels_match":true,"display_passed":true,"cameras_passed":true,"buttons_passed":true,"connectivity_passed":true,"charging_port_passed":true,"activation_lock_cleared":true,"notes":"line\nbreak"}'::jsonb);
+  ('control_note', '{"imei_confirmed_physical":true,"identity_labels_match":true,"display_passed":true,"cameras_passed":true,"buttons_passed":true,"connectivity_passed":true,"charging_port_passed":true,"activation_lock_cleared":true,"notes":"line\nbreak"}'::jsonb),
+  ('valid_blue', '{"imei_confirmed_physical":true,"identity_labels_match":true,"display_passed":true,"cameras_passed":true,"buttons_passed":true,"connectivity_passed":true,"charging_port_passed":true,"activation_lock_cleared":true,"notes":"Blue device independently inspected"}'::jsonb),
+  ('valid_white', '{"imei_confirmed_physical":true,"identity_labels_match":true,"display_passed":true,"cameras_passed":true,"buttons_passed":true,"connectivity_passed":true,"charging_port_passed":true,"activation_lock_cleared":true,"notes":"White device independently inspected"}'::jsonb);
 set constraints all immediate;
 set constraints all deferred;
 
@@ -65,6 +67,15 @@ select has_table('public', 'opening_stock_price_changes', 'Opening stock creates
 select has_view('public', 'opening_stock_invoice_lines_view', 'Opening stock exposes separate quantity columns through a view');
 select col_type_is('public', 'supplier_invoice_lines', 'unit_cost_pesewas', 'bigint', 'Purchase cost uses integer pesewas');
 select col_type_is('public', 'opening_stock_units', 'approved_price_pesewas', 'bigint', 'Approved price uses integer pesewas');
+select col_type_is('public', 'supplier_invoices', 'declared_total_pesewas', 'bigint', 'Declared invoice total uses integer pesewas');
+select col_type_is('public', 'supplier_invoice_lines', 'line_total_pesewas', 'bigint', 'Calculated line total uses integer pesewas');
+select has_view('public', 'opening_stock_invoice_reconciliation_view', 'Opening stock exposes declared-total reconciliation through a view');
+select ok(
+  (select is_nullable = 'YES' from information_schema.columns
+   where table_schema = 'public' and table_name = 'supplier_invoices'
+     and column_name = 'supplier_invoice_number'),
+  'Supplier invoice number/reference is optional'
+);
 select ok(
   (select bool_and(relrowsecurity and relforcerowsecurity) from pg_class where oid = any (array[
     'public.supplier_invoices'::regclass,
@@ -78,9 +89,11 @@ select ok(
 );
 select ok(
   not has_column_privilege('authenticated', 'public.supplier_invoice_lines', 'unit_cost_pesewas', 'SELECT')
+  and not has_column_privilege('authenticated', 'public.supplier_invoice_lines', 'line_total_pesewas', 'SELECT')
+  and not has_column_privilege('authenticated', 'public.supplier_invoices', 'declared_total_pesewas', 'SELECT')
   and not has_column_privilege('authenticated', 'public.opening_stock_units', 'unit_cost_pesewas', 'SELECT')
   and not has_column_privilege('authenticated', 'public.store_inventory', 'cost_pesewas', 'SELECT'),
-  'Purchase cost columns are not directly granted to authenticated users'
+  'Purchase cost, declared total, and calculated line total columns are not directly granted'
 );
 
 select ok(private.is_valid_opening_stock_imei('357000000000017'), 'A plausible Luhn-valid IMEI is accepted');
@@ -113,7 +126,7 @@ select lives_ok(
 select lives_ok(
   $$insert into opening_stock_fixture_ids (id, value)
     select 'invoice', invoice_id
-    from public.create_supplier_invoice('00000000-0000-4000-8000-000000000009', 'Approved Supplier', 'OS-2026-001', date '2026-11-23', 'Initial invoice')$$,
+    from public.create_supplier_invoice('00000000-0000-4000-8000-000000000009', 'Approved Supplier', 'OS-2026-001', date '2026-11-23', 4700000, 'Initial invoice')$$,
   'Manager creates a supplier invoice'
 );
 select lives_ok(
@@ -144,6 +157,122 @@ select throws_ok(
   $$select unit_cost_pesewas from public.supplier_invoice_lines where id = (select value from opening_stock_fixture_ids where id = 'line1')$$,
   '42501', null,
   'Even a manager cannot select the raw purchase-cost column directly'
+);
+
+select is(
+  (select line_total_pesewas from public.opening_stock_invoice_lines_view where id = (select value from opening_stock_fixture_ids where id = 'line1')),
+  3500000::bigint, 'A line total is calculated from quantity × integer-pesewa unit cost'
+);
+select throws_ok(
+  $$select line_total_pesewas from public.supplier_invoice_lines where id = (select value from opening_stock_fixture_ids where id = 'line1')$$,
+  '42501', null,
+  'Even a manager cannot select the raw calculated line total directly'
+);
+select throws_ok(
+  $$select declared_total_pesewas from public.supplier_invoices where id = (select value from opening_stock_fixture_ids where id = 'invoice')$$,
+  '42501', null,
+  'Even a manager cannot select the raw declared invoice total directly'
+);
+
+-- A 15-line, 48-unit, GHS 146,550 fixture verifies reconciliation without any
+-- application constant. The declared total is 14,655,000 integer pesewas.
+select lives_ok(
+  $recon$insert into opening_stock_fixture_ids (id, value)
+    select 'reconciliation_invoice', invoice_id
+    from public.create_supplier_invoice('00000000-0000-4000-8000-000000000009', 'Fixture Supplier', null, date '2026-11-23', 14655000, 'Declared total reconciliation fixture')$recon$,
+  'Manager creates an accurately described invoice without a supplier reference'
+);
+select is(
+  (select supplier_invoice_number from public.opening_stock_invoices_view where id = (select value from opening_stock_fixture_ids where id = 'reconciliation_invoice')),
+  null::text, 'The optional supplier invoice reference is stored as null'
+);
+select lives_ok(
+  $recon$insert into opening_stock_fixture_ids (id, value)
+    select 'optional_invoice_second', invoice_id
+    from public.create_supplier_invoice('00000000-0000-4000-8000-000000000009', 'Second Fixture Supplier', null, date '2026-11-23', 100000, null)$recon$,
+  'More than one invoice without a supplier reference is allowed'
+);
+select throws_ok(
+  $recon$select * from public.create_supplier_invoice('00000000-0000-4000-8000-000000000009', 'Invalid Reference Supplier', 'x', date '2026-11-23', 100000, null)$recon$,
+  '22023', null,
+  'A nonblank but invalid optional supplier reference is rejected'
+);
+select lives_ok(
+  $recon$with added_lines as (
+    select added.invoice_line_id
+    from generate_series(1, 15) as series(n)
+    cross join lateral public.add_supplier_invoice_line(
+      (select value from opening_stock_fixture_ids where id = 'reconciliation_invoice'),
+      (select value from opening_stock_fixture_ids where id = 'model_catalogue'),
+      case when series.n <= 14 then 3 else 6 end,
+      case when series.n <= 14 then 300000 else 342500 end,
+      null
+    ) as added
+  )
+  select count(*) from added_lines$recon$,
+  'Manager adds fifteen invoice lines with forty-eight total units'
+);
+select is(
+  (select line_count from public.opening_stock_invoice_reconciliation_view where invoice_id = (select value from opening_stock_fixture_ids where id = 'reconciliation_invoice')),
+  15, 'The reconciliation view reports fifteen invoice lines'
+);
+select is(
+  (select quantity_invoiced from public.opening_stock_invoice_reconciliation_view where invoice_id = (select value from opening_stock_fixture_ids where id = 'reconciliation_invoice')),
+  48, 'The reconciliation view reports forty-eight invoiced units'
+);
+select is(
+  (select declared_total_pesewas from public.opening_stock_invoice_reconciliation_view where invoice_id = (select value from opening_stock_fixture_ids where id = 'reconciliation_invoice')),
+  14655000::bigint, 'The manager sees the stored GHS 146,550 declared total as integer pesewas'
+);
+select is(
+  (select calculated_total_pesewas from public.opening_stock_invoice_reconciliation_view where invoice_id = (select value from opening_stock_fixture_ids where id = 'reconciliation_invoice')),
+  14655000::numeric, 'The manager sees the sum of fifteen calculated line totals before confirmation'
+);
+select is(
+  (select difference_pesewas from public.opening_stock_invoice_reconciliation_view where invoice_id = (select value from opening_stock_fixture_ids where id = 'reconciliation_invoice')),
+  0::numeric, 'The calculated and declared totals have zero difference'
+);
+select ok(
+  (select reconciled from public.opening_stock_invoice_reconciliation_view where invoice_id = (select value from opening_stock_fixture_ids where id = 'reconciliation_invoice')),
+  'The declared total reconciles with the persisted line totals'
+);
+select is(
+  (select sum(line_total_pesewas) from public.opening_stock_invoice_lines_view where invoice_id = (select value from opening_stock_fixture_ids where id = 'reconciliation_invoice')),
+  14655000::numeric, 'Every displayed line total contributes to the calculated invoice total'
+);
+select throws_ok(
+  $recon$select * from public.confirm_supplier_invoice((select value from opening_stock_fixture_ids where id = 'reconciliation_invoice'), 14655000, 15, 48, 14654999, true)$recon$,
+  '23514', null,
+  'Confirmation rejects an expected calculated total that does not equal persisted line totals'
+);
+select lives_ok(
+  $recon$select * from public.confirm_supplier_invoice((select value from opening_stock_fixture_ids where id = 'reconciliation_invoice'), 14655000, 15, 48, 14655000, true)$recon$,
+  'Manager confirms the invoice only after the displayed line totals match its declared total'
+);
+select ok(
+  (select confirmed_at is not null from public.opening_stock_invoice_reconciliation_view where invoice_id = (select value from opening_stock_fixture_ids where id = 'reconciliation_invoice')),
+  'Invoice confirmation is persisted and attributed'
+);
+select is(
+  (select count(*)::integer from public.audit_events where action = 'opening_stock.invoice_totals_confirmed' and entity_id = (select value from opening_stock_fixture_ids where id = 'reconciliation_invoice')),
+  1, 'Invoice confirmation appends one attributed audit event'
+);
+select throws_ok(
+  $recon$select * from public.confirm_supplier_invoice((select value from opening_stock_fixture_ids where id = 'reconciliation_invoice'), 14655000, 15, 48, 14655000, true)$recon$,
+  '23514', null,
+  'The same invoice confirmation cannot be replayed'
+);
+select lives_ok(
+  $recon$select * from public.add_supplier_invoice_line((select value from opening_stock_fixture_ids where id = 'reconciliation_invoice'), (select value from opening_stock_fixture_ids where id = 'model_catalogue'), 1, 1, null)$recon$,
+  'Adding a line after confirmation remains an audited workflow change'
+);
+select is(
+  (select confirmed_at from public.opening_stock_invoice_reconciliation_view where invoice_id = (select value from opening_stock_fixture_ids where id = 'reconciliation_invoice')),
+  null::timestamptz, 'A later line change clears the prior totals confirmation'
+);
+select ok(
+  (select not reconciled from public.opening_stock_invoice_reconciliation_view where invoice_id = (select value from opening_stock_fixture_ids where id = 'reconciliation_invoice')),
+  'A later line change requires a fresh declared-total review'
 );
 select throws_ok(
   $$select cost_pesewas from public.store_inventory limit 1$$,
@@ -207,13 +336,38 @@ select throws_ok(
   '23514', null,
   'A batch cannot exceed the outstanding invoice quantity'
 );
+select throws_ok(
+  $$select * from public.receive_opening_stock_devices((select value from opening_stock_fixture_ids where id = 'line1'), jsonb_build_array(jsonb_build_object('imei','357000000000900','colour','Blue','condition','excellent','battery_health',98,'inspection',(select doc from opening_stock_inspection_fixtures where name = 'valid')), jsonb_build_object('imei','357000000001080','colour','White','condition','good','battery_health',91)))$$,
+  '22023', null,
+  'A batch with one device missing its own inspection fails atomically'
+);
 select is((select count(*)::integer from public.opening_stock_units), 1, 'Rejected batches leave no partial device rows');
 
 select lives_ok(
   $$insert into opening_stock_unit_fixture (label, unit_id, imei)
     select 'batch_' || row_number() over (order by imei)::text, unit_id, imei
-    from public.receive_opening_stock_devices((select value from opening_stock_fixture_ids where id = 'line1'), jsonb_build_array(jsonb_build_object('imei','357000000000025','colour','Blue','condition','excellent','battery_health',98,'inspection',(select doc from opening_stock_inspection_fixtures where name = 'valid')), jsonb_build_object('imei','357000000000033','colour','White','condition','good','battery_health',91,'inspection',(select doc from opening_stock_inspection_fixtures where name = 'valid')), jsonb_build_object('imei','357000000000041','colour','Black','condition','excellent','battery_health',96,'inspection',(select doc from opening_stock_inspection_fixtures where name = 'valid'))))$$,
-  'Manager receives a valid three-device batch atomically'
+    from public.receive_opening_stock_devices((select value from opening_stock_fixture_ids where id = 'line1'), jsonb_build_array(jsonb_build_object('imei','357000000000025','colour','Blue','condition','excellent','battery_health',98,'inspection',(select doc from opening_stock_inspection_fixtures where name = 'valid_blue')), jsonb_build_object('imei','357000000000033','colour','White','condition','good','battery_health',91,'inspection',(select doc from opening_stock_inspection_fixtures where name = 'valid_white')), jsonb_build_object('imei','357000000000041','colour','Black','condition','excellent','battery_health',96,'inspection',(select doc from opening_stock_inspection_fixtures where name = 'valid'))))$$,
+  'Manager receives a valid three-device batch atomically with device-specific details'
+);
+select is(
+  (select colour from public.opening_stock_units_view where imei = '357000000000025'),
+  'Blue', 'The first batch device keeps its own colour'
+);
+select is(
+  (select condition from public.opening_stock_units_view where imei = '357000000000033'),
+  'good', 'The second batch device keeps its own condition'
+);
+select is(
+  (select battery_health from public.opening_stock_units_view where imei = '357000000000041'),
+  96, 'The third batch device keeps its own battery health'
+);
+select is(
+  (select inspection ->> 'notes' from public.opening_stock_units_view where imei = '357000000000025'),
+  'Blue device independently inspected', 'The first batch device keeps its own inspection attestation'
+);
+select is(
+  (select inspection ->> 'notes' from public.opening_stock_units_view where imei = '357000000000033'),
+  'White device independently inspected', 'The second batch device keeps a different inspection attestation'
 );
 select is(
   (select quantity_received from public.opening_stock_invoice_lines_view where id = (select value from opening_stock_fixture_ids where id = 'line1')),
@@ -243,11 +397,11 @@ select throws_ok(
   'A short correction reason is rejected'
 );
 select lives_ok(
-  $$select * from public.correct_supplier_invoice((select value from opening_stock_fixture_ids where id = 'invoice'), 'Approved Supplier GH', 'OS-2026-001A', date '2026-11-23', 'Reissued invoice', 'Supplier reissued invoice with corrected identity')$$,
+  $$select * from public.correct_supplier_invoice((select value from opening_stock_fixture_ids where id = 'invoice'), 'Approved Supplier GH', 'OS-2026-001A', date '2026-11-23', 4700000, 'Reissued invoice', 'Supplier reissued invoice with corrected identity')$$,
   'Invoice identity correction is audited'
 );
 select throws_ok(
-  $$select * from public.correct_supplier_invoice((select value from opening_stock_fixture_ids where id = 'invoice'), 'Approved Supplier', 'OS-2026-001A', date '2026-11-23', 'Reissued invoice', 'x')$$,
+  $$select * from public.correct_supplier_invoice((select value from opening_stock_fixture_ids where id = 'invoice'), 'Approved Supplier', 'OS-2026-001A', date '2026-11-23', 4700000, 'Reissued invoice', 'x')$$,
   '22023', null,
   'A short invoice correction reason is rejected'
 );
@@ -291,6 +445,22 @@ select is(
   null::bigint, 'The permission-masked view returns null cost to an employee viewer'
 );
 select is(
+  (select line_total_pesewas from public.opening_stock_invoice_lines_view where id = (select value from opening_stock_fixture_ids where id = 'line1')),
+  null::bigint, 'The permission-masked view returns null line total without manage_inventory'
+);
+select is(
+  (select declared_total_pesewas from public.opening_stock_invoice_reconciliation_view where invoice_id = (select value from opening_stock_fixture_ids where id = 'reconciliation_invoice')),
+  null::bigint, 'The reconciliation view masks the declared total without manage_inventory'
+);
+select is(
+  (select calculated_total_pesewas from public.opening_stock_invoice_reconciliation_view where invoice_id = (select value from opening_stock_fixture_ids where id = 'reconciliation_invoice')),
+  null::numeric, 'The reconciliation view masks the calculated total without manage_inventory'
+);
+select ok(
+  (select not reconciled from public.opening_stock_invoice_reconciliation_view where invoice_id = (select value from opening_stock_fixture_ids where id = 'reconciliation_invoice')),
+  'The reconciliation view does not expose reconciliation to cost-restricted viewers'
+);
+select is(
   (select count(*)::integer from public.opening_stock_corrections_view),
   0, 'Correction history containing cost is hidden without manage_inventory'
 );
@@ -300,7 +470,7 @@ select throws_ok(
   'Employees cannot select the staged-unit cost column'
 );
 select throws_ok(
-  $$insert into public.supplier_invoices (store_id, supplier_name, supplier_invoice_number, invoice_date, created_by_user_id, created_by_membership_id, created_by_display_name) values ('00000000-0000-4000-8000-000000000009','Bypass','BYPASS',date '2026-11-23','17000000-0000-4000-8000-000000000002','27000000-0000-4000-8000-000000000002','Bypass')$$,
+  $$insert into public.supplier_invoices (store_id, supplier_name, supplier_invoice_number, invoice_date, declared_total_pesewas, created_by_user_id, created_by_membership_id, created_by_display_name) values ('00000000-0000-4000-8000-000000000009','Bypass','BYPASS',date '2026-11-23',100000,'17000000-0000-4000-8000-000000000002','27000000-0000-4000-8000-000000000002','Bypass')$$,
   '42501', null,
   'Direct browser-style invoice inserts are denied'
 );
@@ -336,12 +506,18 @@ select throws_ok(
   '42501', null,
   'Anonymous callers cannot read opening-stock views'
 );
+select throws_ok(
+  $$select * from public.opening_stock_invoice_reconciliation_view limit 1$$,
+  '42501', null,
+  'Anonymous callers cannot read invoice reconciliation'
+);
 
 reset role;
 set local role authenticated;
 select set_config('request.jwt.claim.sub', '17000000-0000-4000-8000-000000000006', true);
 select set_config('request.jwt.claims', '{"sub":"17000000-0000-4000-8000-000000000006","role":"authenticated"}', true);
 select is((select count(*)::integer from public.opening_stock_invoice_lines_view), 0, 'A cross-store manager cannot see store A invoice-line progress');
+select is((select count(*)::integer from public.opening_stock_invoice_reconciliation_view), 0, 'A cross-store manager cannot see store A invoice reconciliation');
 select throws_ok(
   $$select * from public.activate_opening_stock_unit((select unit_id from opening_stock_unit_fixture where label = 'individual'), 850000, true)$$,
   '42501', null,
@@ -374,6 +550,11 @@ select throws_ok(
   $$select * from public.receive_opening_stock_device((select value from opening_stock_fixture_ids where id = 'line2'), '357000000000082', 'Blue', 'excellent', 98, (select doc from opening_stock_inspection_fixtures where name = 'valid'))$$,
   '42501', null,
   'A permission override that removes manage_inventory blocks receiving'
+);
+select throws_ok(
+  $recon$select * from public.confirm_supplier_invoice((select value from opening_stock_fixture_ids where id = 'reconciliation_invoice'), 14655000, 16, 49, 14655001, true)$recon$,
+  '42501', null,
+  'A permission override that removes manage_inventory blocks invoice confirmation'
 );
 
 reset role;

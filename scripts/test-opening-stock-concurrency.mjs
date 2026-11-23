@@ -43,7 +43,7 @@ function imeiFor(offset) {
   return luhnImei(`35${String(Date.now() + offset).slice(-12)}`)
 }
 
-const inspection = {
+const inspectionChecks = {
   imei_confirmed_physical: true,
   identity_labels_match: true,
   display_passed: true,
@@ -52,16 +52,19 @@ const inspection = {
   connectivity_passed: true,
   charging_port_passed: true,
   activation_lock_cleared: true,
-  notes: "Local concurrency inspection passed",
 }
 
-function device(imei) {
+function inspectionFor(label) {
+  return { ...inspectionChecks, notes: `Local concurrency inspection passed for ${label}` }
+}
+
+function device(imei, label, condition = "excellent", batteryHealth = 99) {
   return {
     imei,
-    colour: "Race Titanium",
-    condition: "excellent",
-    battery_health: 99,
-    inspection,
+    colour: `Race ${label}`,
+    condition,
+    battery_health: batteryHealth,
+    inspection: inspectionFor(label),
   }
 }
 
@@ -120,8 +123,9 @@ const modelCatalogueId = registration.data[0].model_catalogue_id
 const invoice = await clients[0].rpc("create_supplier_invoice", {
   p_store_id: storeId,
   p_supplier_name: "Race Supplier",
-  p_supplier_invoice_number: `RACE-${suffix}`.slice(0, 80),
+  p_supplier_invoice_number: null,
   p_invoice_date: new Date().toISOString().slice(0, 10),
+  p_declared_total_pesewas: 2100000,
   p_notes: null,
 })
 noError(invoice.error, "Create race invoice")
@@ -137,16 +141,41 @@ const line = await clients[0].rpc("add_supplier_invoice_line", {
 noError(line.error, "Add race invoice line")
 const lineId = line.data[0].invoice_line_id
 
+const { data: reconciliation, error: reconciliationError } = await clients[0]
+  .from("opening_stock_invoice_reconciliation_view")
+  .select("*")
+  .eq("invoice_id", invoiceId)
+  .single()
+noError(reconciliationError, "Read opening-stock invoice reconciliation")
+assert.equal(reconciliation.line_count, 1)
+assert.equal(reconciliation.quantity_invoiced, 3)
+assert.equal(Number(reconciliation.declared_total_pesewas), 2100000)
+assert.equal(Number(reconciliation.calculated_total_pesewas), 2100000)
+assert.equal(Number(reconciliation.difference_pesewas), 0)
+assert.equal(reconciliation.reconciled, true)
+
+const confirmedInvoice = await clients[0].rpc("confirm_supplier_invoice", {
+  p_invoice_id: invoiceId,
+  p_expected_declared_total_pesewas: Number(reconciliation.declared_total_pesewas),
+  p_expected_line_count: reconciliation.line_count,
+  p_expected_quantity_invoiced: reconciliation.quantity_invoiced,
+  p_expected_calculated_total_pesewas: Number(reconciliation.calculated_total_pesewas),
+  p_totals_confirmed: true,
+})
+noError(confirmedInvoice.error, "Confirm reconciled supplier invoice")
+assert.equal(confirmedInvoice.data[0].calculated_total_pesewas, 2100000)
+
 const duplicateImei = imeiFor(0)
+const firstDevice = device(duplicateImei, "Alpha")
 const receiveAttempts = await Promise.all(
   clients.map((client) =>
     client.rpc("receive_opening_stock_device", {
       p_invoice_line_id: lineId,
-      p_imei: duplicateImei,
-      p_colour: "Race Titanium",
-      p_condition: "excellent",
-      p_battery_health: 99,
-      p_inspection: inspection,
+      p_imei: firstDevice.imei,
+      p_colour: firstDevice.colour,
+      p_condition: firstDevice.condition,
+      p_battery_health: firstDevice.battery_health,
+      p_inspection: firstDevice.inspection,
     })
   )
 )
@@ -161,7 +190,10 @@ const batchImeis = [imeiFor(101), imeiFor(202)]
 assert.equal(new Set([duplicateImei, ...batchImeis]).size, 3)
 const batch = await clients[0].rpc("receive_opening_stock_devices", {
   p_invoice_line_id: lineId,
-  p_devices: batchImeis.map(device),
+  p_devices: [
+    device(batchImeis[0], "Beta", "good", 94),
+    device(batchImeis[1], "Gamma", "excellent", 96),
+  ],
 })
 noError(batch.error, "Receive remaining race batch")
 assert.equal(batch.data.length, 2)
@@ -175,6 +207,28 @@ const { count: stagedCount, error: stagedError } = await admin
   .eq("status", "staged")
 noError(stagedError, "Count staged race units")
 assert.equal(stagedCount, 3)
+
+const expectedDevices = [
+  firstDevice,
+  device(batchImeis[0], "Beta", "good", 94),
+  device(batchImeis[1], "Gamma", "excellent", 96),
+]
+const { data: stagedDevices, error: stagedDevicesError } = await admin
+  .from("opening_stock_units")
+  .select("imei,colour,condition,battery_health,inspection")
+  .eq("invoice_line_id", lineId)
+  .in("imei", expectedDevices.map((entry) => entry.imei))
+noError(stagedDevicesError, "Read staged per-device details")
+assert.equal(stagedDevices.length, 3)
+for (const expected of expectedDevices) {
+  const persisted = stagedDevices.find((entry) => entry.imei === expected.imei)
+  assert.ok(persisted, `Staged unit ${expected.imei} exists`)
+  assert.equal(persisted.colour, expected.colour)
+  assert.equal(persisted.condition, expected.condition)
+  assert.equal(persisted.battery_health, expected.battery_health)
+  assert.equal(persisted.inspection.notes, expected.inspection.notes)
+}
+assert.equal(new Set(stagedDevices.map((entry) => entry.inspection.notes)).size, 3)
 
 const activationAttempts = await Promise.all(
   clients.map((client) =>
@@ -291,4 +345,4 @@ const { count: repricingAuditCount, error: repricingAuditError } = await admin
 noError(repricingAuditError, "Count repricing audit events")
 assert.equal(repricingAuditCount, 1)
 
-console.log("Opening-stock concurrency test passed: duplicate receipt, activation, and stale repricing are serialized with one winner each.")
+console.log("Opening-stock concurrency test passed: optional-reference invoice totals, device-specific atomic batches, duplicate receipt, activation, and stale repricing are serialized with one winner each.")

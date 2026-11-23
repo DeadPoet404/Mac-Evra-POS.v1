@@ -20,11 +20,15 @@ export type OpeningStockInvoice = {
   id: string
   storeId: string
   supplierName: string
-  supplierInvoiceNumber: string
+  supplierInvoiceNumber: string | null
   invoiceDate: string
   currency: "GHS"
   status: "open" | "closed"
+  declaredTotalPesewas: number | null
+  costVisible: boolean
   notes: string | null
+  confirmedAt: string | null
+  confirmedByDisplayName: string | null
   createdByDisplayName: string
   createdAt: string
 }
@@ -46,10 +50,29 @@ export type OpeningStockInvoiceLine = {
   quantityOutstanding: number
   costVisible: boolean
   unitCostPesewas: number | null
+  lineTotalPesewas: number | null
   currency: "GHS"
   notes: string | null
   createdByDisplayName: string
   createdAt: string
+}
+
+export type OpeningStockInvoiceReconciliation = {
+  invoiceId: string
+  storeId: string
+  supplierName: string
+  supplierInvoiceNumber: string | null
+  invoiceDate: string
+  status: "open" | "closed"
+  lineCount: number
+  quantityInvoiced: number
+  declaredTotalPesewas: number | null
+  calculatedTotalPesewas: number | null
+  differencePesewas: number | null
+  reconciled: boolean
+  costVisible: boolean
+  confirmedAt: string | null
+  confirmedByDisplayName: string | null
 }
 
 export type OpeningStockUnit = {
@@ -103,6 +126,7 @@ export type OpeningStockDashboard = {
   models: OpeningStockModel[]
   invoices: OpeningStockInvoice[]
   lines: OpeningStockInvoiceLine[]
+  reconciliations: OpeningStockInvoiceReconciliation[]
   units: OpeningStockUnit[]
   corrections: OpeningStockCorrection[]
   priceChanges: OpeningStockPriceChange[]
@@ -157,6 +181,12 @@ function unitStatus(value: unknown): OpeningStockUnitStatus {
   return status as OpeningStockUnitStatus
 }
 
+function invoiceStatus(value: unknown): "open" | "closed" {
+  const status = requiredString(value, "invoice status")
+  if (status !== "open" && status !== "closed") throw new Error("Opening-stock response has an invalid invoice status.")
+  return status
+}
+
 function currencyValue(value: unknown): "GHS" {
   if (requiredString(value, "currency") !== "GHS") throw new Error("Opening-stock response has unsupported currency.")
   return "GHS"
@@ -181,17 +211,20 @@ function mapModel(value: unknown): OpeningStockModel {
 
 function mapInvoice(value: unknown): OpeningStockInvoice {
   const row = requiredRecord(value, "invoice")
-  const status = requiredString(row.status, "invoice status")
-  if (status !== "open" && status !== "closed") throw new Error("Opening-stock response has an invalid invoice status.")
+  const costVisible = requiredBoolean(row.cost_visible, "invoice cost visibility")
   return {
     id: requiredString(row.id, "invoice ID"),
     storeId: requiredString(row.store_id, "invoice store ID"),
     supplierName: requiredString(row.supplier_name, "supplier name"),
-    supplierInvoiceNumber: requiredString(row.supplier_invoice_number, "invoice number"),
+    supplierInvoiceNumber: optionalString(row.supplier_invoice_number),
     invoiceDate: requiredString(row.invoice_date, "invoice date"),
     currency: currencyValue(row.currency),
-    status,
+    status: invoiceStatus(row.status),
+    declaredTotalPesewas: costVisible ? optionalInteger(row.declared_total_pesewas) : null,
+    costVisible,
     notes: optionalString(row.notes),
+    confirmedAt: optionalString(row.confirmed_at),
+    confirmedByDisplayName: optionalString(row.confirmed_by_display_name),
     createdByDisplayName: requiredString(row.created_by_display_name, "invoice creator"),
     createdAt: requiredString(row.created_at, "invoice timestamp"),
   }
@@ -217,10 +250,32 @@ function mapLine(value: unknown): OpeningStockInvoiceLine {
     quantityOutstanding: requiredInteger(row.quantity_outstanding, "outstanding quantity"),
     costVisible,
     unitCostPesewas: costVisible ? optionalInteger(row.unit_cost_pesewas) : null,
+    lineTotalPesewas: costVisible ? optionalInteger(row.line_total_pesewas) : null,
     currency: currencyValue(row.currency),
     notes: optionalString(row.notes),
     createdByDisplayName: requiredString(row.created_by_display_name, "line creator"),
     createdAt: requiredString(row.created_at, "line timestamp"),
+  }
+}
+
+function mapReconciliation(value: unknown): OpeningStockInvoiceReconciliation {
+  const row = requiredRecord(value, "invoice reconciliation")
+  return {
+    invoiceId: requiredString(row.invoice_id, "reconciliation invoice ID"),
+    storeId: requiredString(row.store_id, "reconciliation store ID"),
+    supplierName: requiredString(row.supplier_name, "reconciliation supplier name"),
+    supplierInvoiceNumber: optionalString(row.supplier_invoice_number),
+    invoiceDate: requiredString(row.invoice_date, "reconciliation invoice date"),
+    status: invoiceStatus(row.status),
+    lineCount: requiredInteger(row.line_count, "invoice line count"),
+    quantityInvoiced: requiredInteger(row.quantity_invoiced, "invoice quantity"),
+    declaredTotalPesewas: optionalInteger(row.declared_total_pesewas),
+    calculatedTotalPesewas: optionalInteger(row.calculated_total_pesewas),
+    differencePesewas: optionalInteger(row.difference_pesewas),
+    reconciled: requiredBoolean(row.reconciled, "invoice reconciliation state"),
+    costVisible: requiredBoolean(row.cost_visible, "reconciliation cost visibility"),
+    confirmedAt: optionalString(row.confirmed_at),
+    confirmedByDisplayName: optionalString(row.confirmed_by_display_name),
   }
 }
 
@@ -289,7 +344,7 @@ function mapPriceChange(value: unknown): OpeningStockPriceChange {
 export async function loadOpeningStockDashboard(storeId: string): Promise<OpeningStockDashboard> {
   parseUuid(storeId, "store")
   const supabase = await createClient()
-  const [models, invoices, lines, units, corrections, priceChanges] = await Promise.all([
+  const [models, invoices, lines, units, corrections, priceChanges, reconciliations] = await Promise.all([
     supabase.from("opening_stock_models_view").select("*").eq("store_id", storeId).order("created_at", { ascending: false }),
     supabase.from("opening_stock_invoices_view").select("*").eq("store_id", storeId).order("created_at", { ascending: false }),
     supabase
@@ -311,15 +366,21 @@ export async function loadOpeningStockDashboard(storeId: string): Promise<Openin
       .eq("store_id", storeId)
       .order("created_at", { ascending: false })
       .limit(20),
+    supabase
+      .from("opening_stock_invoice_reconciliation_view")
+      .select("*")
+      .eq("store_id", storeId)
+      .order("invoice_date", { ascending: false }),
   ])
 
-  const errors = [models.error, invoices.error, lines.error, units.error, corrections.error, priceChanges.error]
+  const errors = [models.error, invoices.error, lines.error, units.error, corrections.error, priceChanges.error, reconciliations.error]
   if (errors.some(Boolean)) throw new Error("Opening-stock records could not be loaded.")
 
   return {
     models: (models.data ?? []).map((row) => mapModel(row as unknown)),
     invoices: (invoices.data ?? []).map((row) => mapInvoice(row as unknown)),
     lines: (lines.data ?? []).map((row) => mapLine(row as unknown)),
+    reconciliations: (reconciliations.data ?? []).map((row) => mapReconciliation(row as unknown)),
     units: (units.data ?? []).map((row) => mapUnit(row as unknown)),
     corrections: (corrections.data ?? []).map((row) => mapCorrection(row as unknown)),
     priceChanges: (priceChanges.data ?? []).map((row) => mapPriceChange(row as unknown)),

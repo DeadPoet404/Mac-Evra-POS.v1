@@ -141,7 +141,7 @@ jobs:
 
           exit "$status"
 
-      - name: Run opening-stock receipt, activation, and repricing concurrency tests
+      - name: Run opening-stock totals, device batch, activation, and repricing concurrency tests
         run: npm run db:test:opening-stock-concurrency
 
       - name: Run invitation suspension concurrency tests

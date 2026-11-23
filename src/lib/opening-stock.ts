@@ -17,6 +17,17 @@ export type OpeningStockCondition = (typeof openingStockConditions)[number]
 export const openingStockUnitStatuses = ["staged", "activated"] as const
 export type OpeningStockUnitStatus = (typeof openingStockUnitStatuses)[number]
 
+export const openingStockInspectionChecks = [
+  { name: "imeiConfirmed", label: "Physical IMEI matches the device" },
+  { name: "labelsMatch", label: "Model and storage labels match" },
+  { name: "displayPassed", label: "Display and touch pass" },
+  { name: "camerasPassed", label: "Cameras pass" },
+  { name: "buttonsPassed", label: "Buttons and housing pass" },
+  { name: "connectivityPassed", label: "Connectivity and charging pass" },
+  { name: "chargingPortPassed", label: "Ports and speakers pass" },
+  { name: "activationLockCleared", label: "Activation Lock is cleared" },
+] as const
+
 export type OpeningStockInspection = {
   imei_confirmed_physical: true
   identity_labels_match: true
@@ -47,8 +58,26 @@ export type OpeningStockQuantityLine = {
 
 export type OpeningStockQuantitySummary = OpeningStockQuantityLine
 
+export type OpeningStockReconciliationLine = {
+  quantityInvoiced: number
+  unitCostPesewas: number | null
+  lineTotalPesewas?: number | null
+  costVisible: boolean
+}
+
+export type OpeningStockInvoiceReconciliationSummary = {
+  lineCount: number
+  quantityInvoiced: number
+  declaredTotalPesewas: number
+  calculatedTotalPesewas: number | null
+  differencePesewas: number | null
+  reconciled: boolean
+  costVisible: boolean
+}
+
 type FormLike = {
   get(name: string): FormDataEntryValue | null
+  entries?(): Iterable<[string, FormDataEntryValue]>
 }
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -119,6 +148,16 @@ function optionalText(value: string, label: string, max: number) {
   return normalized
 }
 
+function optionalInvoiceReference(value: string, label: string) {
+  const trimmed = value.trim()
+  if (!trimmed) return null
+  const normalized = requiredText(trimmed, label, 2, 80)
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/ -]*$/.test(normalized)) {
+    throw new Error(`Enter a valid ${label}.`)
+  }
+  return normalized
+}
+
 export function parseUuid(value: FormDataEntryValue | string | null | undefined, label: string) {
   if (typeof value !== "string" || !uuidPattern.test(value)) throw new Error(`Select a valid ${label}.`)
   return value
@@ -142,6 +181,16 @@ export function parsePositiveInteger(value: FormDataEntryValue | string | null |
   return parsed
 }
 
+function parseIntegerPesewas(value: FormDataEntryValue | string | null | undefined, label: string) {
+  const input = typeof value === "string" ? value.trim() : ""
+  if (!/^\d{1,15}$/.test(input)) throw new Error(`Enter a valid ${label}.`)
+  const parsed = Number(input)
+  if (!Number.isSafeInteger(parsed) || parsed <= 0 || parsed > 100_000_000_000_000) {
+    throw new Error(`${label} must be a positive integer-pesewa amount.`)
+  }
+  return parsed
+}
+
 export function parsePesewas(value: FormDataEntryValue | string | null | undefined, label: string) {
   const pesewas = parseGhsToPesewas(value)
   if (pesewas <= 0) throw new Error(`${label} must be greater than zero.`)
@@ -150,24 +199,12 @@ export function parsePesewas(value: FormDataEntryValue | string | null | undefin
 }
 
 export function parseReason(value: FormDataEntryValue | string | null | undefined) {
-  const reason = requiredText(typeof value === "string" ? value : "", "correction or repricing reason", 5, 500)
-  return reason
+  return requiredText(typeof value === "string" ? value : "", "correction or repricing reason", 5, 500)
 }
 
 export function parseInspectionInput(form: FormLike): OpeningStockInspection {
-  const requiredChecks = [
-    "imeiConfirmed",
-    "labelsMatch",
-    "displayPassed",
-    "camerasPassed",
-    "buttonsPassed",
-    "connectivityPassed",
-    "chargingPortPassed",
-    "activationLockCleared",
-  ] as const
-
-  for (const name of requiredChecks) {
-    const value = formString(form, name)
+  for (const check of openingStockInspectionChecks) {
+    const value = formString(form, check.name)
     if (!["on", "true", "1", "yes"].includes(value.toLowerCase())) {
       throw new Error("Complete and confirm every physical inspection check.")
     }
@@ -226,9 +263,71 @@ export function parseIndividualDeviceInput(form: FormLike): OpeningStockDeviceIn
   return { imei, ...parseCommonDeviceFields(form) }
 }
 
+/**
+ * Batch rows are strictly device-scoped. There is no top-level device detail or
+ * inspection fallback that could copy one device's attestation to every IMEI.
+ */
 export function parseBatchDeviceInput(form: FormLike): OpeningStockDeviceInput[] {
-  const common = parseCommonDeviceFields(form)
-  return parseImeiBatch(formString(form, "imeiBatch")).map((imei) => ({ imei, ...common }))
+  if (typeof form.entries !== "function") {
+    throw new Error("Batch receiving requires per-device form fields.")
+  }
+
+  const deviceCount = parsePositiveInteger(formString(form, "deviceCount"), "batch device count", 100)
+  const sharedFields = [
+    "imei",
+    "imeiBatch",
+    "colour",
+    "condition",
+    "batteryHealth",
+    "inspectionNotes",
+    ...openingStockInspectionChecks.map((check) => check.name),
+  ]
+  if (sharedFields.some((field) => formString(form, field))) {
+    throw new Error("Every batch device must provide its own details and inspection attestation.")
+  }
+
+  const allowedFields = new Set<string>([
+    "imei",
+    "colour",
+    "condition",
+    "batteryHealth",
+    "inspectionNotes",
+    ...openingStockInspectionChecks.map((check) => check.name),
+  ])
+  const rows = new Map<number, Map<string, FormDataEntryValue>>()
+
+  for (const [key, value] of form.entries()) {
+    if (!key.startsWith("devices.")) continue
+    const match = /^devices\.(\d+)\.([A-Za-z][A-Za-z0-9]*)$/.exec(key)
+    if (!match) throw new Error("Each batch field must belong to one numbered device.")
+    const index = Number(match[1])
+    const field = match[2]
+    if (!Number.isSafeInteger(index) || index < 0 || index >= deviceCount) {
+      throw new Error("Batch device rows are numbered out of range.")
+    }
+    if (!allowedFields.has(field)) throw new Error("A batch device contains an unsupported field.")
+    const row = rows.get(index) ?? new Map<string, FormDataEntryValue>()
+    if (row.has(field)) throw new Error("Each batch device field must be supplied once.")
+    row.set(field, value)
+    rows.set(index, row)
+  }
+
+  const devices: OpeningStockDeviceInput[] = []
+  const seenImeis = new Set<string>()
+  for (let index = 0; index < deviceCount; index += 1) {
+    const row = rows.get(index)
+    if (!row) throw new Error(`Device ${index + 1} is missing its own details and inspection.`)
+    const rowForm: FormLike = { get: (name) => row.get(name) ?? null }
+    const imei = normalizeOpeningStockImei(formString(rowForm, "imei"))
+    if (!isValidRealImei(imei)) {
+      throw new Error(`Device ${index + 1} needs a real 15-digit IMEI with a valid Luhn check digit.`)
+    }
+    if (seenImeis.has(imei)) throw new Error("Each IMEI in a batch must be unique.")
+    seenImeis.add(imei)
+    devices.push({ imei, ...parseCommonDeviceFields(rowForm) })
+  }
+
+  return devices
 }
 
 export function parseModelRegistrationInput(form: FormLike) {
@@ -242,9 +341,24 @@ export function parseModelRegistrationInput(form: FormLike) {
 export function parseSupplierInvoiceInput(form: FormLike) {
   return {
     supplierName: requiredText(formString(form, "supplierName"), "supplier name", 2, 160),
-    invoiceNumber: requiredText(formString(form, "invoiceNumber"), "supplier invoice number", 2, 80),
+    invoiceNumber: optionalInvoiceReference(formString(form, "invoiceNumber"), "supplier invoice number or reference"),
     invoiceDate: parseDate(formString(form, "invoiceDate")),
+    declaredTotalPesewas: parsePesewas(formString(form, "declaredTotalGhs"), "Declared invoice total"),
     notes: optionalText(formString(form, "notes"), "Invoice notes", 1000),
+  }
+}
+
+export function parseConfirmSupplierInvoiceInput(form: FormLike) {
+  const confirmed = formString(form, "totalsConfirmed").toLowerCase()
+  if (!["on", "true", "1", "yes"].includes(confirmed)) {
+    throw new Error("Confirm that the line totals match the supplier invoice before continuing.")
+  }
+  return {
+    invoiceId: parseUuid(formString(form, "invoiceId"), "invoice"),
+    expectedDeclaredTotalPesewas: parseIntegerPesewas(formString(form, "expectedDeclaredTotalPesewas"), "Expected declared total"),
+    expectedLineCount: parsePositiveInteger(formString(form, "expectedLineCount"), "expected line count", 1000),
+    expectedQuantityInvoiced: parsePositiveInteger(formString(form, "expectedQuantityInvoiced"), "expected invoice quantity", 100000),
+    expectedCalculatedTotalPesewas: parseIntegerPesewas(formString(form, "expectedCalculatedTotalPesewas"), "Expected calculated total"),
   }
 }
 
@@ -323,4 +437,58 @@ export function summarizeOpeningStockQuantities(
       quantityOutstanding: 0,
     }
   )
+}
+
+/** Calculates every line total from quantity × integer-pesewa unit cost. */
+export function summarizeOpeningStockInvoiceReconciliation(
+  lines: readonly OpeningStockReconciliationLine[],
+  declaredTotalPesewas: number
+): OpeningStockInvoiceReconciliationSummary {
+  if (!Number.isSafeInteger(declaredTotalPesewas) || declaredTotalPesewas <= 0) {
+    throw new Error("Declared invoice total must be a positive integer-pesewa amount.")
+  }
+
+  let quantityInvoiced = 0
+  let calculatedTotalPesewas = 0
+  let costVisible = lines.length > 0
+
+  for (const line of lines) {
+    if (!Number.isSafeInteger(line.quantityInvoiced) || line.quantityInvoiced < 1) {
+      throw new Error("Each invoice line needs a positive integer quantity.")
+    }
+    quantityInvoiced += line.quantityInvoiced
+
+    const unitCost = line.costVisible ? line.unitCostPesewas : null
+    if (
+      unitCost === null ||
+      !Number.isSafeInteger(unitCost) ||
+      unitCost <= 0 ||
+      line.lineTotalPesewas === null
+    ) {
+      costVisible = false
+      continue
+    }
+
+    const calculatedLineTotal = line.quantityInvoiced * unitCost
+    if (!Number.isSafeInteger(calculatedLineTotal)) {
+      throw new Error("Invoice line total is too large.")
+    }
+    if (line.lineTotalPesewas !== undefined && line.lineTotalPesewas !== calculatedLineTotal) {
+      throw new Error("Invoice line total does not equal quantity × unit cost.")
+    }
+    calculatedTotalPesewas += calculatedLineTotal
+    if (!Number.isSafeInteger(calculatedTotalPesewas)) {
+      throw new Error("Calculated invoice total is too large.")
+    }
+  }
+
+  return {
+    lineCount: lines.length,
+    quantityInvoiced,
+    declaredTotalPesewas,
+    calculatedTotalPesewas: costVisible ? calculatedTotalPesewas : null,
+    differencePesewas: costVisible ? calculatedTotalPesewas - declaredTotalPesewas : null,
+    reconciled: costVisible && calculatedTotalPesewas === declaredTotalPesewas,
+    costVisible,
+  }
 }

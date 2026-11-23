@@ -7,6 +7,7 @@ import { requirePermissions } from "@/lib/auth/server"
 import {
   parseActivationInput,
   parseBatchDeviceInput,
+  parseConfirmSupplierInvoiceInput,
   parseIndividualDeviceInput,
   parseInvoiceCorrectionInput,
   parseInvoiceLineCorrectionInput,
@@ -77,10 +78,27 @@ export async function createSupplierInvoiceAction(formData: FormData): Promise<v
       p_supplier_name: input.supplierName,
       p_supplier_invoice_number: input.invoiceNumber,
       p_invoice_date: input.invoiceDate,
+      p_declared_total_pesewas: input.declaredTotalPesewas,
       p_notes: input.notes || null,
     },
     "invoice-created",
     { storeParam: true }
+  )
+}
+
+export async function confirmSupplierInvoiceAction(formData: FormData): Promise<void> {
+  const input = parseOrRedirect(() => parseConfirmSupplierInvoiceInput(formData))
+  await callOpeningStockRpc(
+    "confirm_supplier_invoice",
+    {
+      p_invoice_id: input.invoiceId,
+      p_expected_declared_total_pesewas: input.expectedDeclaredTotalPesewas,
+      p_expected_line_count: input.expectedLineCount,
+      p_expected_quantity_invoiced: input.expectedQuantityInvoiced,
+      p_expected_calculated_total_pesewas: input.expectedCalculatedTotalPesewas,
+      p_totals_confirmed: true,
+    },
+    "invoice-confirmed"
   )
 }
 
@@ -108,6 +126,7 @@ export async function correctSupplierInvoiceAction(formData: FormData): Promise<
       p_supplier_name: input.supplierName,
       p_supplier_invoice_number: input.invoiceNumber,
       p_invoice_date: input.invoiceDate,
+      p_declared_total_pesewas: input.declaredTotalPesewas,
       p_notes: input.notes || null,
       p_reason: input.reason,
     },
