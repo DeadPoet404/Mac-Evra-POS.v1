@@ -63,7 +63,7 @@ See `docs/supabase-foundation.md` for the table and policy summary.
 
 ### Requirements
 
-- Node.js 22 or newer
+- Node.js 24 or newer
 - npm
 - Docker Desktop or another Docker-compatible daemon
 
