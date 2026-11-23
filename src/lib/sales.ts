@@ -112,12 +112,12 @@ export function saleCompletionPresentation(
     return {
       eyebrow: "Not paid · not fulfilled",
       title: "Awaiting verified payment.",
-      description: "The sale details are saved, but no payment record exists and no inventory has been marked sold.",
+      description: "The sale is saved, but no payment has been recorded and the device has not been marked sold.",
       amountLabel: "Amount awaiting verification",
-      noticeTitle: "Do not hand over any device.",
-      notice: "Phase 6 must create and verify a payment, then atomically fulfil reservations and mark inventory sold.",
-      actionLabel: "Review sale",
-      actionHref: `/new-sale/checkout?sale=${encodeURIComponent(saleId)}`,
+      noticeTitle: "Do not hand over the device.",
+      notice: "Payment must be verified before fulfilment.",
+      actionLabel: "Return to sales",
+      actionHref: "/new-sale",
     }
   }
 

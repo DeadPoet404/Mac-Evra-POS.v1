@@ -89,8 +89,8 @@ test("direct completion navigation confirms only an awaiting-payment sale", asyn
 
   assert.equal(presentation.title, "Awaiting verified payment.")
   assert.equal(presentation.amountLabel, "Amount awaiting verification")
-  assert.equal(presentation.actionHref, `/new-sale/checkout?sale=${completionSaleId}`)
-  assert.match(presentation.description, /no payment record exists/i)
+  assert.equal(presentation.actionHref, "/new-sale")
+  assert.match(presentation.description, /no payment has been recorded/i)
 })
 
 test("direct completion navigation identifies a draft and links back to that draft", async () => {
