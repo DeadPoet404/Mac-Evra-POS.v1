@@ -76,6 +76,8 @@ npm run supabase:start
 npx supabase status
 ```
 
+`src/app/globals.css` imports `tw-animate-css` by its package name. This is the portable Tailwind CSS 4 form because the package exposes its stylesheet through its `style` export. If that import cannot be resolved, use Node.js 24 or newer and rerun `npm ci`; do not replace it with a relative path into `node_modules`.
+
 Copy the local API URL and local publishable key reported by `supabase status` into `.env.local`:
 
 ```dotenv
