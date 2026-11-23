@@ -99,7 +99,7 @@ jobs:
       - name: Lint database schema
         run: npm run db:lint
 
-      - name: Run all pgTAP database suites (Phases 1–6)
+      - name: Run all pgTAP database suites (Phases 1–6 and opening stock)
         shell: bash
         run: |
           set +e
@@ -140,6 +140,9 @@ jobs:
           fi
 
           exit "$status"
+
+      - name: Run opening-stock receipt, activation, and repricing concurrency tests
+        run: npm run db:test:opening-stock-concurrency
 
       - name: Run invitation suspension concurrency tests
         run: npm run db:test:auth-concurrency

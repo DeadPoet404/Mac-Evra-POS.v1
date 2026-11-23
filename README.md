@@ -8,7 +8,9 @@ Phases 1–5 provide the Supabase identity/RBAC foundation, persistent physical 
 
 Phase 6 adds one immutable, manually confirmed full payment per sale and atomic completion. The database derives the store, employee, membership, permissions, item price, total, and inventory state from trusted records; the browser supplies only the sale identifier, one supported method, optional reference metadata, and explicit receipt attestation. One transaction records payment, fulfils the reservation, marks inventory sold, appends a sold movement, completes the sale, and writes attributed audit events.
 
-The employee route order is exactly IMEI → Payment → Customer details → Sale complete. Split/partial payments, gateways, automatic provider verification, refunds, reversals, receipts, trade-in settlement, reconciliation, and aggregate reporting remain excluded or later-phase functionality. The Phase 6 migration is prepared for review and has **not** been applied to hosted Supabase.
+Opening stock adds supplier invoices and invoice lines, store model registration, real-IMEI and inspection-validated individual/batch receiving, manager-only purchase costs, separate invoiced/received/staged/activated/outstanding quantities, audited invoice corrections, and protected activation/repricing. Received devices remain staged and non-sellable until a manager with pricing approval confirms a positive sale price; activation then atomically creates the physical device, available inventory row, intake movement, and attributed audit event.
+
+The employee route order is exactly IMEI → Payment → Customer details → Sale complete. Split/partial payments, gateways, automatic provider verification, refunds, reversals, receipts, trade-in settlement, supplier payments/reconciliation, and aggregate reporting remain excluded or later-phase functionality. Phases 4–6 and the opening-stock migration are prepared for review and have **not** been applied to hosted Supabase.
 
 ### Employee routes
 
@@ -31,6 +33,7 @@ The employee route order is exactly IMEI → Payment → Customer details → Sa
 | `/manager` | Store overview and attention queue |
 | `/manager/sales` | Real store-scoped sale drafts, items, customers, totals, and employee attribution |
 | `/manager/inventory` | Demonstration IMEI-level register |
+| `/manager/opening-stock` | Supplier invoices, staged receiving, cost-controlled reconciliation, activation, and repricing |
 | `/manager/employees` | Preview profiles, roles, and permissions |
 | `/manager/approvals` | Preview sensitive-action requests |
 | `/manager/reports` | Demonstration reporting |
@@ -45,7 +48,7 @@ The hosted project inspected for this repository is:
 - Region: `eu-west-1`
 - PostgreSQL: 17
 
-It was an empty, healthy Supabase project when first inspected. Later read-only verification found Phases 1–3 recorded, custom SMTP configured, and an intentional first-administrator bootstrap. Phase 4–6 hosted migration state must be checked with `supabase migration list --linked` before any owner-approved push; this implementation did not change hosted state.
+It was an empty, healthy Supabase project when first inspected. Later read-only verification found Phases 1–3 recorded, custom SMTP configured, and an intentional first-administrator bootstrap. Phase 4–6 and opening-stock hosted migration state must be checked with `supabase migration list --linked` before any owner-approved push; this implementation did not change hosted state.
 
 Backend files:
 
@@ -56,6 +59,7 @@ Backend files:
 - `supabase/migrations/20261123200000_phase_04_employee_management.sql` — audited store membership management
 - `supabase/migrations/20261123220000_phase_05_sales_customers.sql` — persistent customers, sale drafts, item snapshots, secure RPCs, grants, and RLS
 - `supabase/migrations/20261123235900_phase_06_manual_payments.sql` — review-only immutable manual payments, atomic completion, grants, and forced RLS; not applied remotely
+- `supabase/migrations/20261124000000_opening_stock_intake.sql` — review-only staged supplier intake, permission-masked cost views, append-only correction/price ledgers, atomic activation/repricing RPCs, grants, and forced RLS; not applied remotely
 - `supabase/seed.sql` — one clearly labelled local development store; no users, credentials, inventory, customers, sales, or financial records
 - `supabase/tests/001_foundation_rls.test.sql` — pgTAP foundation policy tests
 - `supabase/tests/002_inventory_reservations.test.sql` — pgTAP inventory integrity and reservation tests
@@ -63,9 +67,11 @@ Backend files:
 - `supabase/tests/004_employee_management.test.sql` — pgTAP employee access-management tests
 - `supabase/tests/005_sales_customers.test.sql` — pgTAP customer, sale, reservation, isolation, total, discount, cancellation, and audit tests
 - `supabase/tests/006_manual_payments.test.sql` — pgTAP manual payment, completion, isolation, fulfilment, immutability, and audit tests
+- `supabase/tests/007_opening_stock_intake.test.sql` — pgTAP staged intake, cost masking, quantity reconciliation, corrections, activation, repricing, isolation, immutability, and audit tests
 - `scripts/test-inventory-concurrency.mjs` — local-only two-client reservation contention test
 - `scripts/test-sales-concurrency.mjs` — local-only competing sale-draft reservation/item test
 - `scripts/test-payment-concurrency.mjs` — local-only duplicate payment-confirmation race test
+- `scripts/test-opening-stock-concurrency.mjs` — local-only duplicate IMEI receipt, concurrent activation, and stale repricing race test
 - `scripts/test-auth-concurrency.mjs` — deterministic local invitation-acceptance versus profile-suspension lock test
 - `scripts/test-auth-sessions.mjs` — local-only email/password, actual captured invitation email, SSR confirmation, password setup, existing-account, and separate-session access test
 - `supabase/templates/` — direct invite and magic-link templates that preserve the complete invitation-specific confirmation parameters
@@ -77,7 +83,7 @@ Backend files:
 - `src/lib/inventory-server.ts` — authenticated server-only inventory reads and reservation RPC wrappers
 - `src/lib/supabase/proxy.ts` and `src/proxy.ts` — Next.js 16 session refresh and route enforcement
 
-See `docs/supabase-foundation.md`, `docs/inventory-phase-2.md`, `docs/employee-auth-phase-3.md`, `docs/sales-phase-5.md`, and `docs/manual-payments-phase-6.md` for security, transaction, deployment, and operational boundaries.
+See `docs/supabase-foundation.md`, `docs/inventory-phase-2.md`, `docs/employee-auth-phase-3.md`, `docs/sales-phase-5.md`, `docs/manual-payments-phase-6.md`, and `docs/opening-stock-intake.md` for security, transaction, deployment, and operational boundaries.
 
 ## Local setup
 
@@ -166,11 +172,12 @@ npm run db:test
 npm run db:test:inventory-concurrency
 npm run db:test:sales-concurrency
 npm run db:test:payment-concurrency
+npm run db:test:opening-stock-concurrency
 npm run db:test:auth-concurrency
 npm run db:test:auth-sessions
 ```
 
-The database commands require the local Supabase Docker stack. The concurrency test refuses non-local Supabase URLs and creates disposable local Auth/inventory fixtures; reset the local database afterwards. The app uses a system font stack, so production builds do not depend on downloading a Google font.
+The database commands require the disposable local Supabase Docker stack. CI rebuilds a fresh database from migrations before schema lint, all pgTAP suites, and the concurrency/session scripts. The concurrency tests refuse non-local Supabase URLs and create disposable local Auth/inventory fixtures; reset the local database afterwards. The app uses a system font stack, so production builds do not depend on downloading a Google font.
 
 ## Security boundaries
 
@@ -196,9 +203,17 @@ The database commands require the local Supabase Docker stack. The concurrency t
 - Manual payment rows are one-per-sale, forced-RLS protected, append-only, and readable only by the sale employee or an authorised same-store manager.
 - A payment reference remains optional employee-entered metadata and is never represented as provider verification.
 - The completion route queries persisted sale and payment state and rejects draft, awaiting-payment, cancelled, missing, inaccessible, and payment-less records as success.
+- Opening-stock tables are forced-RLS protected and deny direct authenticated writes; every workflow write uses a fixed-search-path `SECURITY DEFINER` RPC that derives actor, store, membership, status, and timestamps from trusted context.
+- Staged opening-stock units never enter `store_inventory` or the reservation lifecycle until protected activation with explicit pricing approval.
+- Real IMEIs require 15 digits, a valid Luhn check digit, and rejection of known placeholders; every received unit requires a complete passing structured inspection.
+- Purchase-cost columns are never granted to authenticated users. Permission-masked views and private helpers return cost only to active same-store members with `access_manager_workspace` and `manage_inventory`.
+- Supplier invoice and line corrections are append-only, attributed, reason-bound before/after ledgers; unit identity and received cost are immutable.
+- Activation creates exactly one physical device, one available inventory row, one intake movement, and one audit event atomically.
+- Repricing requires `approve_inventory_adjustments`, an expected-price optimistic lock, available inventory, explicit confirmation, one adjustment movement, and one immutable price-change ledger row.
+- Anonymous, employee, cross-store, and permission-overridden sessions cannot read cost or write protected opening-stock tables; correction history containing cost is separately permission-gated.
 
 ## Important production blockers
 
-Later phases must add trusted inventory intake/adjustment commands, trade-in inspection/valuation/approval, receipts, refunds, returns, provider reconciliation, broader reporting, monitoring, backups, and end-to-end browser tests.
+Trusted opening-stock intake and approved repricing are now implemented, but supplier payments/accounts payable, automated external device-registry verification, goods-return notes, trade-in inspection/valuation/approval, receipts, refunds, returns, provider reconciliation, broader reporting, monitoring, backups, and end-to-end browser tests remain later-phase work.
 
 Manual payment references, UI inspection results, and preview approval decisions are not automatic third-party verification. Any provider-backed payment flow requires a separate reviewed integration and reconciliation model.
