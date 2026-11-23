@@ -1,8 +1,10 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 
 export default function CustomerInfoPage() {
+  const router = useRouter();
   const [name, setName] = useState("");
   const [phone, setPhone] = useState("");
   const [email, setEmail] = useState("");
@@ -16,13 +18,13 @@ export default function CustomerInfoPage() {
       email: email.trim()
     }));
 
-    window.location.href = "/new-sale/checkout";
+    router.push("/new-sale/checkout");
   }
 
   return (
     <main className="min-h-screen bg-white text-[#1D1D1F]">
       <header className="flex items-center justify-between px-6 py-5">
-        <button onClick={() => window.location.href = "/new-sale/payment"} className="text-sm text-[#6E0728]">← Back</button>
+        <button onClick={() => router.push("/new-sale/payment")} className="text-sm text-[#6E0728]">← Back</button>
         <span className="text-sm font-semibold">New Sale</span>
         <div className="w-10" />
       </header>

@@ -1,3 +1,5 @@
+import Image from "next/image";
+
 export default function ActionCards() {
   const arrow = (
     <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#F0F0F2] transition group-hover:bg-[#E5E5E7]">
@@ -21,9 +23,11 @@ export default function ActionCards() {
       {/* NEW SALE */}
       <button className="group overflow-hidden rounded-[28px] bg-white text-left shadow-sm transition hover:shadow-md active:scale-[0.99]">
         <div className="flex h-[240px] items-center justify-center bg-white p-5">
-          <img
+          <Image
             src="/Mac-evra-sale-badge.jpeg"
             alt="New Sale"
+            width={190}
+            height={190}
             className="h-[190px] w-[190px] object-contain"
           />
         </div>
@@ -55,7 +59,7 @@ export default function ActionCards() {
           <div>
             <h2 className="text-xl font-semibold text-[#1D1D1F]">Process a Swap</h2>
             <p className="mt-1 text-sm text-gray-500">
-              Trade in a customer's device.
+              Trade in a customer&apos;s device.
             </p>
           </div>
           {arrow}

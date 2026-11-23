@@ -1,20 +1,14 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { BrowserMultiFormatReader } from "@zxing/browser";
 
 export default function NewSalePage() {
+  const router = useRouter();
   const [isScanning, setIsScanning] = useState(false);
   const [scannedCode, setScannedCode] = useState("356789104567890");
   const [scanError, setScanError] = useState("");
-  const [customerName, setCustomerName] = useState("");
-  const [customerPhone, setCustomerPhone] = useState("");
-  const [customerEmail, setCustomerEmail] = useState("");
-  const [paymentMethod, setPaymentMethod] = useState("Cash");
-  const [paymentAmount, setPaymentAmount] = useState("8500");
-  const [paymentReference, setPaymentReference] = useState("");
-  const [paymentVerified, setPaymentVerified] = useState(false);
-
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const controlsRef = useRef<{ stop: () => void } | null>(null);
@@ -191,7 +185,7 @@ export default function NewSalePage() {
                 <div className="border-t border-[#E5E5E7] pt-4">
                   <button
                     type="button"
-                    onClick={() => window.location.href = "/new-sale/payment"}
+                    onClick={() => router.push("/new-sale/payment")}
                     className="w-full rounded-full bg-[#6E0728] px-5 py-4 text-[15px] font-semibold text-white transition hover:bg-[#57051F] active:scale-[0.98]"
                   >
                     Continue
