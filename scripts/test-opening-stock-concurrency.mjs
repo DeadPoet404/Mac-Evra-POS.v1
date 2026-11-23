@@ -154,6 +154,32 @@ assert.equal(Number(reconciliation.calculated_total_pesewas), 2100000)
 assert.equal(Number(reconciliation.difference_pesewas), 0)
 assert.equal(reconciliation.reconciled, true)
 
+const unconfirmedSingle = await clients[0].rpc("receive_opening_stock_device", {
+  p_invoice_line_id: lineId,
+  p_imei: imeiFor(0),
+  p_colour: "Natural Titanium",
+  p_condition: "excellent",
+  p_battery_health: 98,
+  p_inspection: inspection("Unconfirmed single"),
+})
+assert.equal(unconfirmedSingle.error?.code, "23514")
+assert.match(unconfirmedSingle.error?.message ?? "", /confirmed before receiving/i)
+
+const unconfirmedBatch = await clients[0].rpc("receive_opening_stock_devices", {
+  p_invoice_line_id: lineId,
+  p_devices: [
+    {
+      imei: imeiFor(0),
+      colour: "Natural Titanium",
+      condition: "excellent",
+      battery_health: 98,
+      inspection: inspection("Unconfirmed batch"),
+    },
+  ],
+})
+assert.equal(unconfirmedBatch.error?.code, "23514")
+assert.match(unconfirmedBatch.error?.message ?? "", /confirmed before receiving/i)
+
 const confirmedInvoice = await clients[0].rpc("confirm_supplier_invoice", {
   p_invoice_id: invoiceId,
   p_expected_declared_total_pesewas: Number(reconciliation.declared_total_pesewas),

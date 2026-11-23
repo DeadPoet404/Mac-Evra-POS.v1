@@ -236,3 +236,24 @@ test("finding 4: batch receiving keeps one device's own details and inspection p
   assert.match(actions, /p_devices: devices/)
   assert.doesNotMatch(actions, /Promise\.all\([\s\S]*receive_opening_stock_device/)
 })
+
+test("final review: receiving forms require explicit condition and battery health and DB enforces reconciliation", () => {
+  const individualPage = read("src/app/manager/opening-stock/page.tsx")
+  const batchForm = read("src/app/manager/opening-stock/batch-receiving-form.tsx")
+  const migration = read("supabase/migrations/20261124000000_opening_stock_intake.sql")
+
+  for (const [label, source] of [
+    ["individual receiving form", individualPage],
+    ["batch receiving form", batchForm],
+  ]) {
+    assert.doesNotMatch(source, /defaultValue="excellent"/, `${label} must not prepopulate excellent condition`)
+    assert.doesNotMatch(source, /defaultValue=\{100\}/, `${label} must not prepopulate 100% battery health`)
+    assert.match(source, /<option value="" disabled>Select condition<\/option>/, `${label} must require explicit condition selection`)
+  }
+
+  assert.match(
+    migration,
+    /if invoice_record\.confirmed_at is null\s+or not private\.opening_stock_invoice_reconciled\(invoice_record\.id\) then\s+raise exception using errcode = '23514', message = 'supplier invoice totals must be confirmed before receiving devices';/,
+    "receive_opening_stock_devices must enforce non-null reconciled invoice confirmation in the database"
+  )
+})

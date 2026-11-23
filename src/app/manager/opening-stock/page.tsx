@@ -115,13 +115,14 @@ function DeviceFields() {
       </label>
       <label className={labelClass}>
         <span>Condition</span>
-        <select name="condition" defaultValue="excellent" className={inputClass}>
+        <select name="condition" required defaultValue="" className={inputClass}>
+          <option value="" disabled>Select condition</option>
           {openingStockConditions.map((condition) => <option key={condition} value={condition}>{condition[0].toUpperCase() + condition.slice(1)}</option>)}
         </select>
       </label>
       <label className={labelClass}>
         <span>Battery health · %</span>
-        <input name="batteryHealth" required type="number" min={1} max={100} defaultValue={100} className={inputClass} />
+        <input name="batteryHealth" required type="number" min={1} max={100} placeholder="Actual %" className={inputClass} />
       </label>
       <div className="sm:col-span-2">
         <p className="mb-2 text-xs font-semibold text-[#424245]">Inspection attestation</p>

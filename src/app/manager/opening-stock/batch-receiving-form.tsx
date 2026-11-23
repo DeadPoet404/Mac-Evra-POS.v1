@@ -86,7 +86,8 @@ export function BatchReceivingForm({
               </label>
               <label className={labelClass}>
                 <span>Condition</span>
-                <select name={`devices.${index}.condition`} defaultValue="excellent" className={inputClass}>
+                <select name={`devices.${index}.condition`} required defaultValue="" className={inputClass}>
+                  <option value="" disabled>Select condition</option>
                   {openingStockConditions.map((condition) => (
                     <option key={condition} value={condition}>{condition[0].toUpperCase() + condition.slice(1)}</option>
                   ))}
@@ -94,7 +95,7 @@ export function BatchReceivingForm({
               </label>
               <label className={labelClass}>
                 <span>Battery health · %</span>
-                <input name={`devices.${index}.batteryHealth`} required type="number" min={1} max={100} defaultValue={100} className={inputClass} />
+                <input name={`devices.${index}.batteryHealth`} required type="number" min={1} max={100} placeholder="Actual %" className={inputClass} />
               </label>
             </div>
             <div>

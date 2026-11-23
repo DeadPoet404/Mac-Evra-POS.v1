@@ -281,6 +281,21 @@ select throws_ok(
 );
 
 select throws_ok(
+  $$select * from public.receive_opening_stock_device((select value from opening_stock_fixture_ids where id = 'line1'), '357000000000017', 'Natural Titanium', 'excellent', 99, (select doc from opening_stock_inspection_fixtures where name = 'valid'))$$,
+  '23514', null,
+  'Single-device receiving rejects an unconfirmed supplier invoice'
+);
+select throws_ok(
+  $$select * from public.receive_opening_stock_devices((select value from opening_stock_fixture_ids where id = 'line1'), jsonb_build_array(jsonb_build_object('imei','357000000000025','colour','Blue','condition','excellent','battery_health',98,'inspection',(select doc from opening_stock_inspection_fixtures where name = 'valid'))))$$,
+  '23514', null,
+  'Batch receiving rejects an unconfirmed supplier invoice'
+);
+select lives_ok(
+  $confirm$select * from public.confirm_supplier_invoice((select value from opening_stock_fixture_ids where id = 'invoice'), 4700000, 2, 7, 4700000, true)$confirm$,
+  'Confirm supplier invoice totals before receiving devices'
+);
+
+select throws_ok(
   $$select * from public.receive_opening_stock_device((select value from opening_stock_fixture_ids where id = 'line1'), '357000000000018', 'Black', 'excellent', 99, (select doc from opening_stock_inspection_fixtures where name = 'valid'))$$,
   '22023', null,
   'Receiving rejects an invalid Luhn check digit'
@@ -397,13 +412,22 @@ select throws_ok(
   'A short correction reason is rejected'
 );
 select lives_ok(
-  $$select * from public.correct_supplier_invoice((select value from opening_stock_fixture_ids where id = 'invoice'), 'Approved Supplier GH', 'OS-2026-001A', date '2026-11-23', 4700000, 'Reissued invoice', 'Supplier reissued invoice with corrected identity')$$,
+  $$select * from public.correct_supplier_invoice((select value from opening_stock_fixture_ids where id = 'invoice'), 'Approved Supplier GH', 'OS-2026-001A', date '2026-11-23', 5330000, 'Reissued invoice', 'Supplier reissued invoice with corrected identity')$$,
   'Invoice identity correction is audited'
 );
 select throws_ok(
-  $$select * from public.correct_supplier_invoice((select value from opening_stock_fixture_ids where id = 'invoice'), 'Approved Supplier', 'OS-2026-001A', date '2026-11-23', 4700000, 'Reissued invoice', 'x')$$,
+  $$select * from public.correct_supplier_invoice((select value from opening_stock_fixture_ids where id = 'invoice'), 'Approved Supplier', 'OS-2026-001A', date '2026-11-23', 5330000, 'Reissued invoice', 'x')$$,
   '22023', null,
   'A short invoice correction reason is rejected'
+);
+select throws_ok(
+  $$select * from public.receive_opening_stock_device((select value from opening_stock_fixture_ids where id = 'line2'), '357000000000058', 'Blue', 'excellent', 98, (select doc from opening_stock_inspection_fixtures where name = 'valid'))$$,
+  '23514', null,
+  'Receiving is blocked after invoice correction resets confirmation'
+);
+select lives_ok(
+  $confirm$select * from public.confirm_supplier_invoice((select value from opening_stock_fixture_ids where id = 'invoice'), 5330000, 2, 8, 5330000, true)$confirm$,
+  'Re-confirm supplier invoice totals after correction before receiving line-two devices'
 );
 
 select lives_ok(
@@ -431,6 +455,14 @@ select throws_ok(
 select lives_ok(
   $$select * from public.correct_supplier_invoice_line((select value from opening_stock_fixture_ids where id = 'line2'), 4, 610000, 'Supplier added one further device')$$,
   'A quantity increase above received count is allowed and audited'
+);
+select lives_ok(
+  $$select * from public.correct_supplier_invoice((select value from opening_stock_fixture_ids where id = 'invoice'), 'Approved Supplier GH', 'OS-2026-001A', date '2026-11-23', 5940000, 'Reissued invoice', 'Supplier updated declared total for added device')$$,
+  'Update declared total after quantity increase'
+);
+select lives_ok(
+  $confirm$select * from public.confirm_supplier_invoice((select value from opening_stock_fixture_ids where id = 'invoice'), 5940000, 2, 9, 5940000, true)$confirm$,
+  'Re-confirm supplier invoice totals after quantity increase'
 );
 
 set local role authenticated;
@@ -560,8 +592,8 @@ select throws_ok(
 reset role;
 insert into public.inventory_devices (device_model_id, imei, colour, condition, battery_health)
 values ((select value from opening_stock_fixture_ids where id = 'device_model'), '357000000000025', 'Blue', 'excellent', 98);
-select is((select count(*)::integer from public.supplier_invoice_corrections), 3, 'Only successful audited corrections are persisted');
-select is((select count(*)::integer from public.audit_events where action in ('opening_stock.invoice_corrected', 'opening_stock.invoice_line_corrected')), 3, 'Every successful correction appends an audit event');
+select is((select count(*)::integer from public.supplier_invoice_corrections), 4, 'Only successful audited corrections are persisted');
+select is((select count(*)::integer from public.audit_events where action in ('opening_stock.invoice_corrected', 'opening_stock.invoice_line_corrected')), 4, 'Every successful correction appends an audit event');
 select throws_ok(
   $$update public.supplier_invoice_corrections set reason = 'tampered' where id = (select id from public.supplier_invoice_corrections limit 1)$$,
   'P0001', null,

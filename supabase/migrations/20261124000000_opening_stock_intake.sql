@@ -1873,6 +1873,11 @@ begin
     raise exception using errcode = '23514', message = 'closed invoice cannot receive devices';
   end if;
 
+  if invoice_record.confirmed_at is null
+    or not private.opening_stock_invoice_reconciled(invoice_record.id) then
+    raise exception using errcode = '23514', message = 'supplier invoice totals must be confirmed before receiving devices';
+  end if;
+
   select catalogue.* into catalogue_record
   from public.opening_stock_models catalogue
   where catalogue.id = line_record.model_catalogue_id
