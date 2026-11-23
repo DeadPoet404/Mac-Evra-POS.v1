@@ -82,10 +82,15 @@ jobs:
             *) echo "Refusing a non-local Supabase URL." >&2; exit 1 ;;
           esac
 
+          # Supabase CLI v3 no longer emits the local mail-capture URL in env
+          # output, while this repository fixes its Inbucket port in config.
+          echo "INBUCKET_URL=http://127.0.0.1:54324" >> .env.local
+
           {
             echo "NEXT_PUBLIC_SUPABASE_URL=$NEXT_PUBLIC_SUPABASE_URL"
             echo "NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY=$NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY"
             echo "SUPABASE_SERVICE_ROLE_KEY=$SUPABASE_SERVICE_ROLE_KEY"
+            echo "INBUCKET_URL=http://127.0.0.1:54324"
           } >> "$GITHUB_ENV"
 
       - name: Rebuild fresh database from migrations
