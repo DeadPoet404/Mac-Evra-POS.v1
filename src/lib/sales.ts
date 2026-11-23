@@ -65,6 +65,80 @@ export function saleStatusLabel(status: SaleStatus) {
   return status[0].toUpperCase() + status.slice(1)
 }
 
+export type SaleCompletionPresentation = {
+  eyebrow: string
+  title: string
+  description: string
+  amountLabel: string
+  noticeTitle: string
+  notice: string
+  actionLabel: string
+  actionHref: string
+}
+
+export function saleCompletionPresentation(
+  status: SaleStatus,
+  saleId: string
+): SaleCompletionPresentation {
+  const draftHref = `/new-sale?sale=${encodeURIComponent(saleId)}`
+
+  if (status === "draft") {
+    return {
+      eyebrow: "Draft · work in progress",
+      title: "This sale is still a draft.",
+      description: "It has not moved to payment review. Return to the draft to review its items, customer, and reservations.",
+      amountLabel: "Current draft total",
+      noticeTitle: "Not awaiting payment.",
+      notice: "This draft must be reviewed and explicitly moved to awaiting payment before any payment workflow can begin.",
+      actionLabel: "Return to draft",
+      actionHref: draftHref,
+    }
+  }
+
+  if (status === "cancelled") {
+    return {
+      eyebrow: "Cancelled · reservations released",
+      title: "This sale was cancelled.",
+      description: "No payment is pending. Active inventory reservations were released during cancellation where applicable, and no inventory was marked sold.",
+      amountLabel: "Total when cancelled",
+      noticeTitle: "Sale cancelled.",
+      notice: "Its active reservations were released where applicable. The devices were not sold or fulfilled.",
+      actionLabel: "Return to sales",
+      actionHref: "/new-sale",
+    }
+  }
+
+  if (status === "awaiting_payment") {
+    return {
+      eyebrow: "Not paid · not fulfilled",
+      title: "Awaiting verified payment.",
+      description: "The sale details are saved, but no payment record exists and no inventory has been marked sold.",
+      amountLabel: "Amount awaiting verification",
+      noticeTitle: "Do not hand over any device.",
+      notice: "Phase 6 must create and verify a payment, then atomically fulfil reservations and mark inventory sold.",
+      actionLabel: "Review sale",
+      actionHref: `/new-sale/checkout?sale=${encodeURIComponent(saleId)}`,
+    }
+  }
+
+  throw new Error(`Unsupported sale completion status: ${status satisfies never}`)
+}
+
+export async function resolveSaleCompletion<
+  T extends { id: string; status: SaleStatus },
+>(
+  saleId: string | undefined,
+  loadSale: (saleId: string) => Promise<T | null>
+): Promise<{ sale: T; presentation: SaleCompletionPresentation } | null> {
+  if (!saleId) return null
+  const sale = await loadSale(saleId)
+  if (!sale) return null
+  return {
+    sale,
+    presentation: saleCompletionPresentation(sale.status, sale.id),
+  }
+}
+
 export function matchesCustomerSearch(
   customer: { fullName: string; phone: string; email: string | null },
   query: string

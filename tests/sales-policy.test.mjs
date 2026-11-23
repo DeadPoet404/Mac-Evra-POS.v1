@@ -7,6 +7,7 @@ import {
   matchesSaleSearch,
   normalizeCustomerInput,
   parseGhsToPesewas,
+  resolveSaleCompletion,
   saleStatusLabel,
 } from "../src/lib/sales.ts"
 
@@ -61,4 +62,54 @@ test("sale statuses never label an unpaid record as paid or completed", () => {
   assert.equal(saleStatusLabel("draft"), "Draft")
   assert.equal(saleStatusLabel("awaiting_payment"), "Awaiting payment")
   assert.equal(saleStatusLabel("cancelled"), "Cancelled")
+})
+
+const completionSaleId = "65000000-0000-4000-8000-000000000001"
+
+async function presentationFromDirectCompletionNavigation(status) {
+  const url = new URL(`/new-sale/complete?sale=${completionSaleId}`, "https://pos.example.test")
+  assert.equal(url.pathname, "/new-sale/complete")
+
+  let requestedSaleId = null
+  const completion = await resolveSaleCompletion(
+    url.searchParams.get("sale") ?? undefined,
+    async (saleId) => {
+      requestedSaleId = saleId
+      return { id: saleId, status }
+    }
+  )
+
+  assert.equal(requestedSaleId, completionSaleId)
+  assert.equal(completion.sale.id, completionSaleId)
+  return completion.presentation
+}
+
+test("direct completion navigation confirms only an awaiting-payment sale", async () => {
+  const presentation = await presentationFromDirectCompletionNavigation("awaiting_payment")
+
+  assert.equal(presentation.title, "Awaiting verified payment.")
+  assert.equal(presentation.amountLabel, "Amount awaiting verification")
+  assert.equal(presentation.actionHref, `/new-sale/checkout?sale=${completionSaleId}`)
+  assert.match(presentation.description, /no payment record exists/i)
+})
+
+test("direct completion navigation identifies a draft and links back to that draft", async () => {
+  const presentation = await presentationFromDirectCompletionNavigation("draft")
+  const copy = Object.values(presentation).join(" ")
+
+  assert.equal(presentation.title, "This sale is still a draft.")
+  assert.equal(presentation.actionLabel, "Return to draft")
+  assert.equal(presentation.actionHref, `/new-sale?sale=${completionSaleId}`)
+  assert.doesNotMatch(copy, /Awaiting verified payment|Amount awaiting verification/)
+})
+
+test("direct completion navigation identifies cancellation and released reservations", async () => {
+  const presentation = await presentationFromDirectCompletionNavigation("cancelled")
+  const copy = Object.values(presentation).join(" ")
+
+  assert.equal(presentation.title, "This sale was cancelled.")
+  assert.match(copy, /reservations were released/i)
+  assert.equal(presentation.actionLabel, "Return to sales")
+  assert.equal(presentation.actionHref, "/new-sale")
+  assert.doesNotMatch(copy, /Awaiting verified payment|Amount awaiting verification/)
 })
