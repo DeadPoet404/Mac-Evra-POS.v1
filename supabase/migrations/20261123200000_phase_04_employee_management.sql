@@ -106,8 +106,11 @@ begin
 
   if target_role_code = 'administrator'
     and target_membership.status = 'active'
-    and (next_role_code <> 'administrator' or next_status <> 'active')
-    and (
+    and (next_role_code <> 'administrator' or next_status <> 'active') then
+    -- Serialize administrator removal so two concurrent changes cannot both
+    -- observe the same last-admin count and leave the store without one.
+    perform 1 from public.stores where id = p_store_id for update;
+    if (
       select count(*)
       from public.store_memberships membership
       join public.roles role_record on role_record.id = membership.role_id
@@ -115,7 +118,8 @@ begin
         and membership.status = 'active'
         and role_record.code = 'administrator'
     ) <= 1 then
-    raise exception using errcode = '23514', message = 'the store must retain at least one active administrator';
+      raise exception using errcode = '23514', message = 'the store must retain at least one active administrator';
+    end if;
   end if;
 
   update public.store_memberships
