@@ -217,6 +217,11 @@ insert into phase_two_test_context (key, value)
 select 'reservation_one', id
 from public.inventory_reservations
 where device_id = '41000000-0000-4000-8000-000000000001'
+  and status = 'active'
+union all
+select 'reservation_two', id
+from public.inventory_reservations
+where device_id = '41000000-0000-4000-8000-000000000002'
   and status = 'active';
 grant select on phase_two_test_context to authenticated;
 set constraints all immediate;
@@ -510,6 +515,69 @@ select is(
   'available',
   'Manager release keeps reservation and inventory status consistent'
 );
+
+update public.store_memberships
+set status = 'suspended'
+where id = '21000000-0000-4000-8000-000000000001';
+
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '11000000-0000-4000-8000-000000000001', true);
+select set_config('request.jwt.claims', '{"sub":"11000000-0000-4000-8000-000000000001","role":"authenticated"}', true);
+select is(
+  (select count(*)::integer from public.inventory_reservations),
+  0,
+  'A suspended employee can no longer read their reservation records'
+);
+select throws_ok(
+  format(
+    'select * from public.release_inventory_reservation(%L::uuid, %L)',
+    (select value from phase_two_test_context where key = 'reservation_two'),
+    'release after membership suspension'
+  ),
+  '42501',
+  'active store membership required',
+  'Membership suspension immediately blocks reservation release'
+);
+select throws_ok(
+  $$
+    select *
+    from public.reserve_inventory_device(
+      '00000000-0000-4000-8000-000000000001',
+      '41000000-0000-4000-8000-000000000003',
+      15
+    )
+  $$,
+  '42501',
+  'active store membership required',
+  'Membership suspension immediately blocks new reservations'
+);
+select throws_ok(
+  $$select public.expire_inventory_reservations('00000000-0000-4000-8000-000000000001', 10)$$,
+  '42501',
+  'active store membership required',
+  'Membership suspension immediately blocks reservation expiry operations'
+);
+
+reset role;
+update public.store_memberships
+set status = 'active'
+where id = '21000000-0000-4000-8000-000000000001';
+
+set local role service_role;
+select throws_ok(
+  $$update public.store_inventory set status = 'reserved' where id = '51000000-0000-4000-8000-000000000003'$$,
+  '42501',
+  null,
+  'Service-role REST access cannot bypass reservation RPCs with a stock-state update'
+);
+select throws_ok(
+  $$update public.inventory_reservations set status = 'released' where device_id = '41000000-0000-4000-8000-000000000002' and status = 'active'$$,
+  '42501',
+  null,
+  'Service-role REST access cannot mutate reservation lifecycle rows directly'
+);
+
+reset role;
 select throws_ok(
   $$update public.inventory_movements set reason = 'rewritten history' where id = (select id from public.inventory_movements limit 1)$$,
   'P0001',

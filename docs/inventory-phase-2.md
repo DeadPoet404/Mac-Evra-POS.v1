@@ -70,7 +70,7 @@ Reservation RPCs also append a Phase 1 `audit_events` record in the same transac
 
 Reservations default to 15 minutes. The reserve RPC accepts a bounded duration from 1 through 60 minutes. Expiry batches are limited to 1 through 500 records.
 
-The reservation owner may release their own reservation only while they retain an active membership and `reserve_inventory`. A different employee cannot release it. A member with `manage_inventory` may release another employee's reservation. Expiry only affects active records whose `expires_at` is in the past and requires `reserve_inventory` or `manage_inventory` in that store.
+The reservation owner may read or release their own reservation only while they retain an active membership and `reserve_inventory`. A different employee cannot release it. A member with `manage_inventory` may release another employee's reservation. Reserve, release, and expiry lock the caller's membership, profile, and store access rows while authorizing, so a concurrent suspension or shutdown serializes before or after the inventory operation. Expiry only affects active records whose `expires_at` is in the past and requires `reserve_inventory` or `manage_inventory` in that store.
 
 ## Atomic reservation algorithm
 
@@ -100,7 +100,9 @@ All five Phase 2 tables have RLS enabled and forced. Anonymous users have no tab
 | Movements | Read only with `manage_inventory` for that store |
 | Direct writes | Denied; lifecycle writes go through the reviewed RPCs |
 
-The service role receives only the table privileges needed by future trusted inventory administration: no deletes, no movement updates, and no movement deletes. It is not used by `src/lib/inventory-server.ts` and must never be exposed to browser code.
+The service role may read and insert model, physical-device, and initial store-inventory rows, but it cannot directly update stock state or mutate reservation lifecycle rows. Dedicated audited commands are still required before production intake or adjustment integration. Movement updates/deletes and all reservation deletes remain blocked. The service role is not used by `src/lib/inventory-server.ts` and must never be exposed to browser code.
+
+The focused security review additionally verified that every security-definer function has an empty search path and explicit execution grants, no reservation RPC accepts a caller-supplied employee ID, suspended members lose reservation visibility, and reserve/release/expiry recheck and lock the authenticated caller's access chain before changing inventory.
 
 ## Next.js server boundary
 
@@ -132,7 +134,7 @@ Session storage is not authoritative and must not become proof of a reservation,
 
 `supabase/tests/002_inventory_reservations.test.sql` covers IMEI validation and uniqueness, integer-pesewa columns, transition rules, store isolation, acquisition-cost restrictions, direct-write denial, successful reservation, competing reservation results, idempotent retries, expiry, owner and manager release rules, sold-device handling, permission overrides, append-only movement history, preserved reservation history, audit creation, and final status consistency.
 
-`scripts/test-inventory-concurrency.mjs` sends two authenticated reservation RPCs concurrently against one local physical device and verifies that exactly one active reservation exists. It refuses every non-local Supabase hostname and loads the local variables from `.env.local` when present. It creates disposable local Auth and inventory fixtures; run a local database reset after the test.
+`scripts/test-inventory-concurrency.mjs` uses two separate authenticated sessions against one local physical device. It verifies exactly one initial reservation succeeds, races the winning release against a competing reserve, issues two simultaneous releases and confirms only one release movement is written, and runs concurrent no-op expiry sweeps. It refuses every non-local Supabase hostname and loads the local variables from `.env.local` when present. It creates disposable local Auth and inventory fixtures; run a local database reset after the test.
 
 Run against a disposable local Supabase stack:
 

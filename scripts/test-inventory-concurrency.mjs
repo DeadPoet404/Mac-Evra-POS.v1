@@ -156,13 +156,123 @@ requireNoError(reservationError, "Read active reservation after contention")
 assert.equal(activeReservations.length, 1)
 assert.ok(users.some((user) => user.id === activeReservations[0].employee_user_id))
 
-const { data: inventory, error: finalInventoryError } = await admin
+const winnerIndex = attempts.findIndex((attempt) => attempt.data[0].result === "reserved")
+const challengerIndex = winnerIndex === 0 ? 1 : 0
+assert.notEqual(winnerIndex, -1)
+assert.equal(activeReservations[0].employee_user_id, users[winnerIndex].id)
+
+const [releaseAttempt, reserveDuringReleaseAttempt] = await Promise.all([
+  employeeClients[winnerIndex].rpc("release_inventory_reservation", {
+    p_reservation_id: activeReservations[0].id,
+    p_reason: "concurrent release and reserve test",
+  }),
+  employeeClients[challengerIndex].rpc("reserve_inventory_device", {
+    p_store_id: storeId,
+    p_device_id: deviceId,
+    p_ttl_minutes: 15,
+  }),
+])
+requireNoError(releaseAttempt.error, "Release during reserve/release contention")
+requireNoError(reserveDuringReleaseAttempt.error, "Reserve during reserve/release contention")
+assert.equal(releaseAttempt.data[0].result, "released")
+assert.ok(
+  ["already_reserved", "reserved"].includes(reserveDuringReleaseAttempt.data[0].result),
+  `Unexpected reserve/release contention result: ${reserveDuringReleaseAttempt.data[0].result}`
+)
+
+let { data: activeAfterRace, error: activeAfterRaceError } = await admin
+  .from("inventory_reservations")
+  .select("id, employee_user_id")
+  .eq("store_inventory_id", inventoryId)
+  .eq("status", "active")
+requireNoError(activeAfterRaceError, "Read active reservation after reserve/release race")
+assert.ok(activeAfterRace.length <= 1)
+
+let { data: inventory, error: finalInventoryError } = await admin
   .from("store_inventory")
   .select("status")
   .eq("id", inventoryId)
   .single()
-requireNoError(finalInventoryError, "Read inventory after contention")
-assert.equal(inventory.status, "reserved")
+requireNoError(finalInventoryError, "Read inventory after reserve/release race")
 
-console.log("PASS: two concurrent authenticated reservation attempts produced one active reservation.")
+if (reserveDuringReleaseAttempt.data[0].result === "reserved") {
+  assert.equal(activeAfterRace.length, 1)
+  assert.equal(activeAfterRace[0].employee_user_id, users[challengerIndex].id)
+  assert.equal(inventory.status, "reserved")
+} else {
+  assert.equal(activeAfterRace.length, 0)
+  assert.equal(inventory.status, "available")
+
+  const replacement = await employeeClients[challengerIndex].rpc("reserve_inventory_device", {
+    p_store_id: storeId,
+    p_device_id: deviceId,
+    p_ttl_minutes: 15,
+  })
+  requireNoError(replacement.error, "Create reservation for concurrent release test")
+  assert.equal(replacement.data[0].result, "reserved")
+
+  activeAfterRace = [
+    {
+      id: replacement.data[0].reservation_id,
+      employee_user_id: users[challengerIndex].id,
+    },
+  ]
+}
+
+const releaseReservationId = activeAfterRace[0].id
+const simultaneousReleases = await Promise.all([
+  employeeClients[challengerIndex].rpc("release_inventory_reservation", {
+    p_reservation_id: releaseReservationId,
+    p_reason: "first simultaneous release",
+  }),
+  employeeClients[challengerIndex].rpc("release_inventory_reservation", {
+    p_reservation_id: releaseReservationId,
+    p_reason: "second simultaneous release",
+  }),
+])
+for (const [index, release] of simultaneousReleases.entries()) {
+  requireNoError(release.error, `Simultaneous release attempt ${index + 1}`)
+  assert.equal(release.data[0].result, "released")
+}
+
+const { data: releaseMovements, error: releaseMovementError } = await admin
+  .from("inventory_movements")
+  .select("id")
+  .eq("reservation_id", releaseReservationId)
+  .eq("movement_type", "reservation_released")
+requireNoError(releaseMovementError, "Read release movements after simultaneous release")
+assert.equal(releaseMovements.length, 1)
+
+const expiryAttempts = await Promise.all(
+  employeeClients.map((client) =>
+    client.rpc("expire_inventory_reservations", {
+      p_store_id: storeId,
+      p_limit: 100,
+    })
+  )
+)
+for (const [index, expiry] of expiryAttempts.entries()) {
+  requireNoError(expiry.error, `Concurrent expiry sweep ${index + 1}`)
+  assert.equal(expiry.data, 0)
+}
+
+const { data: finalActiveReservations, error: finalReservationError } = await admin
+  .from("inventory_reservations")
+  .select("id")
+  .eq("store_inventory_id", inventoryId)
+  .eq("status", "active")
+requireNoError(finalReservationError, "Read final active reservation state")
+assert.equal(finalActiveReservations.length, 0)
+
+;({ data: inventory, error: finalInventoryError } = await admin
+  .from("store_inventory")
+  .select("status")
+  .eq("id", inventoryId)
+  .single())
+requireNoError(finalInventoryError, "Read final inventory state")
+assert.equal(inventory.status, "available")
+
+console.log("PASS: concurrent authenticated reserve attempts produced exactly one active reservation.")
+console.log("PASS: competing reserve/release and simultaneous release operations remained consistent.")
+console.log("PASS: concurrent expiry sweeps were safe and idempotent with no elapsed reservations.")
 console.log("Run a local database reset after this test to remove its disposable Auth and inventory fixtures.")

@@ -506,19 +506,27 @@ begin
     raise exception using errcode = '22023', message = 'reservation duration must be between 1 and 60 minutes';
   end if;
 
-  if not private.has_store_permission(p_store_id, 'reserve_inventory') then
-    raise exception using errcode = '42501', message = 'active reserve_inventory permission required';
-  end if;
-
+  -- Lock the caller's active access chain before checking permission. A
+  -- concurrent membership suspension, profile suspension, or store shutdown
+  -- must serialize before or after this reservation transaction, never race it.
   select membership.id
   into caller_membership_id
   from public.store_memberships membership
+  join public.profiles profile on profile.id = membership.user_id
+  join public.stores store_record on store_record.id = membership.store_id
   where membership.store_id = p_store_id
     and membership.user_id = caller_user_id
-    and membership.status = 'active';
+    and membership.status = 'active'
+    and profile.status = 'active'
+    and store_record.status = 'active'
+  for share of membership, profile, store_record;
 
   if caller_membership_id is null then
     raise exception using errcode = '42501', message = 'active store membership required';
+  end if;
+
+  if not private.has_store_permission(p_store_id, 'reserve_inventory') then
+    raise exception using errcode = '42501', message = 'active reserve_inventory permission required';
   end if;
 
   select inventory.*
@@ -730,23 +738,28 @@ begin
     return;
   end if;
 
+  select membership.id
+  into caller_membership_id
+  from public.store_memberships membership
+  join public.profiles profile on profile.id = membership.user_id
+  join public.stores store_record on store_record.id = membership.store_id
+  where membership.store_id = reservation_record.store_id
+    and membership.user_id = caller_user_id
+    and membership.status = 'active'
+    and profile.status = 'active'
+    and store_record.status = 'active'
+  for share of membership, profile, store_record;
+
+  if caller_membership_id is null then
+    raise exception using errcode = '42501', message = 'active store membership required';
+  end if;
+
   can_manage_inventory := private.has_store_permission(reservation_record.store_id, 'manage_inventory');
   can_reserve_inventory := private.has_store_permission(reservation_record.store_id, 'reserve_inventory');
 
   if not can_manage_inventory
     and not (reservation_record.employee_user_id = caller_user_id and can_reserve_inventory) then
     raise exception using errcode = '42501', message = 'reservation owner or manage_inventory permission required';
-  end if;
-
-  select membership.id
-  into caller_membership_id
-  from public.store_memberships membership
-  where membership.store_id = reservation_record.store_id
-    and membership.user_id = caller_user_id
-    and membership.status = 'active';
-
-  if caller_membership_id is null then
-    raise exception using errcode = '42501', message = 'active store membership required';
   end if;
 
   select inventory.*
@@ -900,22 +913,27 @@ begin
     raise exception using errcode = '22023', message = 'expiry batch limit must be between 1 and 500';
   end if;
 
+  select membership.id
+  into caller_membership_id
+  from public.store_memberships membership
+  join public.profiles profile on profile.id = membership.user_id
+  join public.stores store_record on store_record.id = membership.store_id
+  where membership.store_id = p_store_id
+    and membership.user_id = caller_user_id
+    and membership.status = 'active'
+    and profile.status = 'active'
+    and store_record.status = 'active'
+  for share of membership, profile, store_record;
+
+  if caller_membership_id is null then
+    raise exception using errcode = '42501', message = 'active store membership required';
+  end if;
+
   if not (
     private.has_store_permission(p_store_id, 'reserve_inventory')
     or private.has_store_permission(p_store_id, 'manage_inventory')
   ) then
     raise exception using errcode = '42501', message = 'inventory reservation permission required';
-  end if;
-
-  select membership.id
-  into caller_membership_id
-  from public.store_memberships membership
-  where membership.store_id = p_store_id
-    and membership.user_id = caller_user_id
-    and membership.status = 'active';
-
-  if caller_membership_id is null then
-    raise exception using errcode = '42501', message = 'active store membership required';
   end if;
 
   for candidate in
@@ -996,7 +1014,10 @@ on public.inventory_reservations
 for select
 to authenticated
 using (
-  employee_user_id = auth.uid()
+  (
+    employee_user_id = auth.uid()
+    and private.is_active_store_member(store_id)
+  )
   or private.has_store_permission(store_id, 'manage_inventory')
 );
 
@@ -1027,10 +1048,10 @@ grant select (
 grant select on table public.inventory_reservations to authenticated;
 grant select on table public.inventory_movements to authenticated;
 
-grant select, insert, update on table public.device_models to service_role;
-grant select, insert, update on table public.inventory_devices to service_role;
-grant select, insert, update on table public.store_inventory to service_role;
-grant select, insert, update on table public.inventory_reservations to service_role;
+grant select, insert on table public.device_models to service_role;
+grant select, insert on table public.inventory_devices to service_role;
+grant select, insert on table public.store_inventory to service_role;
+grant select on table public.inventory_reservations to service_role;
 grant select, insert on table public.inventory_movements to service_role;
 
 revoke all on function public.reserve_inventory_device(uuid, uuid, integer) from public;

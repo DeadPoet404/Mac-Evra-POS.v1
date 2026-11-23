@@ -56,6 +56,7 @@ Backend files:
 - `supabase/tests/001_foundation_rls.test.sql` — pgTAP foundation policy tests
 - `supabase/tests/002_inventory_reservations.test.sql` — pgTAP inventory integrity, isolation, permission, reservation, expiry, release, and history tests
 - `scripts/test-inventory-concurrency.mjs` — local-only two-client reservation contention test
+- `.github/workflows/phase-2-validation.yml` — Node 24 application checks and disposable local Supabase database validation
 - `src/lib/supabase/client.ts` — browser client
 - `src/lib/supabase/server.ts` — cookie-aware Server Component/server-action client
 - `src/lib/inventory-server.ts` — authenticated server-only inventory reads and reservation RPC wrappers
