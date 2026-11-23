@@ -1,4 +1,5 @@
 @import "tailwindcss";
+/* Resolve animations through the package export; do not hard-code a node_modules path. */
 @import "tw-animate-css";
 @import "shadcn/tailwind.css";
 
