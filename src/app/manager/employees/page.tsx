@@ -41,6 +41,8 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
   if (staffError || inviteError) throw new Error("Staff records could not be loaded.")
   const staff = (staffRows ?? []) as unknown as Staff[]
   const invites = (inviteRows ?? []) as unknown as Invitation[]
+  const canManageRoles = membership.permissions.includes("manage_roles")
+  const assignableRoles = canManageRoles ? roles : roles.filter((role) => role.code === "employee")
   const activeCount = staff.filter((item) => item.status === "active").length
   const pendingCount = invites.filter((item) => item.status === "pending" && new Date(item.expires_at) > new Date()).length
   const params = await searchParams
@@ -66,7 +68,7 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
           </div>
           <form action={inviteStaffFormAction} className="mt-5 grid gap-4 md:grid-cols-[1fr_240px_auto] md:items-end">
             <label className="space-y-2"><span className="block text-sm font-medium">Work email</span><input name="email" type="email" required maxLength={320} autoComplete="email" placeholder="name@example.com" className="h-10 w-full rounded-lg border border-input bg-white px-3 text-sm outline-none focus:border-[#6E0728]" /></label>
-            <label className="space-y-2"><span className="block text-sm font-medium">Role</span><select name="roleCode" defaultValue="employee" className="h-10 w-full rounded-lg border border-input bg-white px-3 text-sm outline-none focus:border-[#6E0728]">{roles.map((role) => <option key={role.code} value={role.code}>{role.name}</option>)}</select></label>
+            <label className="space-y-2"><span className="block text-sm font-medium">Role</span><select name="roleCode" defaultValue="employee" className="h-10 w-full rounded-lg border border-input bg-white px-3 text-sm outline-none focus:border-[#6E0728]">{assignableRoles.map((role) => <option key={role.code} value={role.code}>{role.name}</option>)}</select></label>
             <Button type="submit" className="h-10 bg-[#6E0728] text-white hover:bg-[#57051F]">Send invitation</Button>
           </form>
         </CardContent>
@@ -81,12 +83,14 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
                 <div className="min-w-0"><p className="truncate text-sm font-medium">{person.profiles.display_name}</p><p className="mt-1 truncate text-xs text-[#86868B]">{person.profiles.work_email ?? "No work email"}</p>{person.profiles.phone ? <p className="mt-1 text-xs text-[#86868B]">{person.profiles.phone}</p> : null}</div>
                 <div className="flex items-center gap-2 text-sm text-[#424245]"><BadgeCheck size={15} className="text-[#6E0728]" />{person.roles.name}</div>
                 <Status value={person.status} />
+                {canManageRoles || person.roles.code === "employee" ? (
                 <form action={updateStaffAction} className="flex flex-wrap items-end gap-2 rounded-xl bg-[#FAFAFB] p-3 sm:col-span-3">
                   <input type="hidden" name="membershipId" value={person.id} />
-                  <label className="min-w-[145px] flex-1 space-y-1"><span className="block text-[11px] font-medium text-[#68686D]">Role</span><select name="roleCode" defaultValue={person.roles.code} className="h-9 w-full rounded-lg border border-input bg-white px-2 text-xs">{roles.map((role) => <option key={role.code} value={role.code}>{role.name}</option>)}</select></label>
+                  <label className="min-w-[145px] flex-1 space-y-1"><span className="block text-[11px] font-medium text-[#68686D]">Role</span><select name="roleCode" defaultValue={person.roles.code} className="h-9 w-full rounded-lg border border-input bg-white px-2 text-xs">{assignableRoles.map((role) => <option key={role.code} value={role.code}>{role.name}</option>)}</select></label>
                   <label className="min-w-[135px] flex-1 space-y-1"><span className="block text-[11px] font-medium text-[#68686D]">Account status</span><select name="status" defaultValue={person.status} className="h-9 w-full rounded-lg border border-input bg-white px-2 text-xs"><option value="active">Active</option><option value="suspended">Suspended</option><option value="inactive">Inactive</option></select></label>
                   <Button type="submit" variant="outline" size="sm" className="h-9">Save access</Button>
                 </form>
+                ) : <p className="text-xs text-[#86868B] sm:col-span-3">Only an administrator can change manager or administrator access.</p>}
                 <p className="text-xs text-[#86868B] sm:col-span-3">Joined: {person.joined_at ? dateLabel(person.joined_at) : "Not joined"}</p>
               </div>)}
             </div> : <EmptyState title="No staff memberships yet" description="Send an invitation to add the first team member." />}
