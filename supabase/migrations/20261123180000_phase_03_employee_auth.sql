@@ -289,8 +289,10 @@ begin
 end;
 $$;
 
-revoke all on function public.prepare_staff_invitation(uuid, text, uuid, integer) from public;
-revoke all on function public.accept_staff_invitations() from public;
+revoke all on function public.prepare_staff_invitation(uuid, text, uuid, integer)
+  from public, anon, authenticated, service_role;
+revoke all on function public.accept_staff_invitations()
+  from public, anon, authenticated, service_role;
 grant execute on function public.prepare_staff_invitation(uuid, text, uuid, integer) to authenticated;
 grant execute on function public.accept_staff_invitations() to authenticated;
 

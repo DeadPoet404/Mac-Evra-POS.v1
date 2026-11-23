@@ -136,6 +136,7 @@ select is(
   1,
   'Invitation acceptance activates only the invited role and store'
 );
+reset role;
 select is(
   (select status from public.staff_invitations where email = 'new.employee@local.test'),
   'accepted',
@@ -147,6 +148,7 @@ select is(
   'Invitation acceptance appends an audit event'
 );
 
+set local role authenticated;
 select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000036', true);
 select set_config('request.jwt.claims', '{"sub":"10000000-0000-4000-8000-000000000036","role":"authenticated"}', true);
 select ok(
@@ -177,13 +179,13 @@ select is(
   0,
   'Expired invitation cannot create a membership'
 );
+reset role;
 select is(
   (select status from public.staff_invitations where id = '30000000-0000-4000-8000-000000000035'),
   'expired',
   'Expired invitation is marked without being accepted'
 );
 
-reset role;
 select is(
   (select count(*)::integer
    from pg_proc p
