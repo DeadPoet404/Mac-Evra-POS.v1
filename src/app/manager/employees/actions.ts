@@ -56,7 +56,7 @@ export async function inviteStaffFormAction(formData: FormData): Promise<void> {
 }
 
 export async function updateStaffAction(formData: FormData): Promise<void> {
-  await requirePermissions(["manage_employee_access"], { nextPath: "/manager/employees" })
+  const { membership } = await requirePermissions(["manage_employee_access"], { nextPath: "/manager/employees" })
   const membershipId = String(formData.get("membershipId") ?? "")
   const roleCode = String(formData.get("roleCode") ?? "")
   const status = String(formData.get("status") ?? "")
@@ -65,6 +65,7 @@ export async function updateStaffAction(formData: FormData): Promise<void> {
   }
   const supabase = await createClient()
   const { error } = await supabase.rpc("update_staff_membership", {
+    p_store_id: membership.storeId,
     p_membership_id: membershipId,
     p_role_code: roleCode || null,
     p_status: status || null,
