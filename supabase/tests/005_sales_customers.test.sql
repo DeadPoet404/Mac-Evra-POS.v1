@@ -58,8 +58,8 @@ select is(
   (select count(*)::integer from public.sales where status = 'draft'), 1,
   'Employee can read their own store-scoped draft'
 );
-select like(
-  (select sale_number from public.sales limit 1), 'ME-%',
+select matches(
+  (select sale_number from public.sales limit 1), '^ME-',
   'Sale receives a unique human-readable identifier'
 );
 
