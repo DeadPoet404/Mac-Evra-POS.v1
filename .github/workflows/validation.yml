@@ -95,7 +95,22 @@ jobs:
         run: npm run db:lint
 
       - name: Run Phase 1, Phase 2, and Phase 3 pgTAP suites
-        run: npm run db:test
+        shell: bash
+        run: |
+          set +e
+          npm run db:test 2>&1 | tee /tmp/db-test.log
+          status=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            details=$(tail -n 80 /tmp/db-test.log)
+            details=${details//'%'/'%25'}
+            details=${details//$'\r'/'%0D'}
+            details=${details//$'\n'/'%0A'}
+            echo "::error title=pgTAP database test failure::$details"
+          fi
+
+          exit "$status"
 
       - name: Run authenticated inventory concurrency tests
         run: npm run db:test:inventory-concurrency
