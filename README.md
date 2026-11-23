@@ -58,7 +58,9 @@ Backend files:
 - `supabase/tests/002_inventory_reservations.test.sql` — pgTAP inventory integrity and reservation tests
 - `supabase/tests/003_employee_auth.test.sql` — pgTAP invitation, role-assignment, suspension, and anonymous-access tests
 - `scripts/test-inventory-concurrency.mjs` — local-only two-client reservation contention test
-- `scripts/test-auth-sessions.mjs` — local-only email/password and separate-session access test
+- `scripts/test-auth-concurrency.mjs` — deterministic local invitation-acceptance versus profile-suspension lock test
+- `scripts/test-auth-sessions.mjs` — local-only email/password, actual captured invitation email, SSR confirmation, password setup, existing-account, and separate-session access test
+- `supabase/templates/` — direct invite and magic-link templates that preserve the complete invitation-specific confirmation parameters
 - `.github/workflows/validation.yml` — Node 24 application checks and disposable local Supabase database validation
 - `src/lib/auth/` — trusted access resolution, route policy, and server-only staff provisioning
 - `src/lib/supabase/client.ts` — browser client
@@ -154,6 +156,7 @@ npm run build
 npm run db:lint
 npm run db:test
 npm run db:test:inventory-concurrency
+npm run db:test:auth-concurrency
 npm run db:test:auth-sessions
 ```
 
@@ -176,6 +179,9 @@ The database commands require the local Supabase Docker stack. The concurrency t
 - Normal employees cannot read acquisition cost or write inventory tables directly.
 - Service-role Auth Admin access is isolated in a `server-only` module and is never used by browser code.
 - Staff invitation preparation and acceptance derive actor identity from the authenticated session and never accept caller-supplied actor IDs.
+- Password sign-in never consumes invitations; email confirmation accepts one invitation ID using a random database-hashed token and a verified Auth email.
+- Profile and store rows remain locked through invitation acceptance so suspension or deactivation cannot race membership creation.
+- Repeated invitation preparation rotates the acceptance token, and each preparation and provider delivery result has a separate audit event.
 - Persistent inventory remains disconnected from the demonstration workflows; no sale, payment, or financial state is authoritative yet.
 
 ## Important production blockers
