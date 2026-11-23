@@ -29,7 +29,9 @@ export async function updateStaffAction(formData: FormData): Promise<void> {
   const membershipId = String(formData.get("membershipId") ?? "")
   const roleCode = String(formData.get("roleCode") ?? "")
   const status = String(formData.get("status") ?? "")
-  if (!membershipId || (!["employee", "manager", "administrator"].includes(roleCode) && !["active", "suspended", "inactive"].includes(status))) {
+  const validRole = roleCode === "" || ["employee", "manager", "administrator"].includes(roleCode)
+  const validStatus = status === "" || ["active", "suspended", "inactive"].includes(status)
+  if (!membershipId || (!roleCode && !status) || !validRole || !validStatus) {
     redirect("/manager/employees?error=invalid-change")
   }
   const supabase = await createClient()
