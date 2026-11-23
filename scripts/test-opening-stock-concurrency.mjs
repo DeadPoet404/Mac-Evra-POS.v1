@@ -160,7 +160,7 @@ const unconfirmedSingle = await clients[0].rpc("receive_opening_stock_device", {
   p_colour: "Natural Titanium",
   p_condition: "excellent",
   p_battery_health: 98,
-  p_inspection: inspection("Unconfirmed single"),
+  p_inspection: inspectionFor("Unconfirmed single"),
 })
 assert.equal(unconfirmedSingle.error?.code, "23514")
 assert.match(unconfirmedSingle.error?.message ?? "", /confirmed before receiving/i)
@@ -173,7 +173,7 @@ const unconfirmedBatch = await clients[0].rpc("receive_opening_stock_devices", {
       colour: "Natural Titanium",
       condition: "excellent",
       battery_health: 98,
-      inspection: inspection("Unconfirmed batch"),
+      inspection: inspectionFor("Unconfirmed batch"),
     },
   ],
 })
