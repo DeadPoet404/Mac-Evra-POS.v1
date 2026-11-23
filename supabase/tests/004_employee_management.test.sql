@@ -70,12 +70,12 @@ select lives_ok(
  'Administrator can assign manager role'
 );
 select throws_ok(
- $$select public.update_staff_membership(
+ $select public.update_staff_membership(
    '00000000-0000-4000-8000-000000000004',
    '20000000-0000-4000-8000-000000000043',
    'employee', null
- )$$,
- '23514', null,
+ )$,
+ '42501', null,
  'Administrator cannot modify their own role'
 );
 
