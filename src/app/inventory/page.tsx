@@ -4,6 +4,7 @@ import { useRouter } from "next/navigation"
 import { useState } from "react"
 import {
   BatteryMedium,
+  ChevronDown,
   CircleAlert,
   Search,
   ShieldCheck,
@@ -163,16 +164,17 @@ function FilterSelect({
   options: string[]
 }) {
   return (
-    <label className="min-w-0">
+    <label className="relative min-w-0">
       <span className="sr-only">{label}</span>
       <select
         value={value}
         onChange={(event) => onChange(event.target.value)}
-        className="h-10 w-full rounded-xl border border-[#E5E5E7] bg-white px-3 text-xs font-medium text-[#424245] outline-none focus:border-[#6E0728]"
+        className="h-10 w-full appearance-none rounded-xl border border-[#E5E5E7] bg-white px-3 pr-8 text-xs font-medium text-[#424245] outline-none focus:border-[#6E0728]"
       >
         <option value="All">All {label.toLowerCase()}</option>
         {options.map((option) => <option key={option} value={option}>{option}</option>)}
       </select>
+      <ChevronDown className="pointer-events-none absolute right-3 top-1/2 size-3.5 -translate-y-1/2 text-[#86868B]" strokeWidth={1.8} aria-hidden="true" />
     </label>
   )
 }
@@ -194,7 +196,7 @@ function DeviceDetails({ phone, onClose, onSelect }: { phone: Phone; onClose: ()
         </div>
 
         <div className="my-6 flex h-36 items-center justify-center rounded-2xl bg-[#F7F7F8] text-[#6E0728]">
-          <Smartphone size={60} strokeWidth={1.1} />
+          <Smartphone size={60} strokeWidth={1.5} aria-hidden="true" />
         </div>
 
         <div className="flex items-center justify-between gap-3">
