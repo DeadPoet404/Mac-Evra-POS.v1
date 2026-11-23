@@ -1,6 +1,6 @@
 begin;
 create extension if not exists pgtap with schema extensions;
-select plan(7);
+select plan(8);
 
 insert into public.stores (id, code, name)
 values ('00000000-0000-4000-8000-000000000004', 'phase4-staff-test', 'Phase 4 Staff Test');
@@ -77,6 +77,15 @@ select throws_ok(
  )$$,
  '42501', null,
  'Administrator cannot modify their own role'
+);
+select throws_ok(
+ $select public.update_staff_membership(
+   '00000000-0000-4000-8000-000000000004',
+   '20000000-0000-4000-8000-000000000044',
+   'employee', 'active'
+ )$,
+ '23514', null,
+ 'The store cannot lose its last active administrator'
 );
 
 reset role;
