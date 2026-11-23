@@ -32,13 +32,16 @@ export default async function EmployeesPage({ searchParams }: { searchParams: Pr
   const supabase = await createClient()
   const [{ data: staffRows, error: staffError }, { data: inviteRows, error: inviteError }] = await Promise.all([
     supabase.from("store_memberships")
-      .select("id,status,joined_at,profiles!inner(display_name,work_email,phone),roles!inner(code,name)")
+      .select("id,status,joined_at,profiles!store_memberships_user_id_fkey!inner(display_name,work_email,phone),roles!inner(code,name)")
       .eq("store_id", membership.storeId).order("created_at", { ascending: false }),
     supabase.from("staff_invitations")
       .select("id,email,status,expires_at,roles!inner(name)")
       .eq("store_id", membership.storeId).order("created_at", { ascending: false }),
   ])
-  if (staffError || inviteError) throw new Error("Staff records could not be loaded.")
+  if (staffError || inviteError) {
+  console.error("Employee records query failed:", { staffError, inviteError })
+  throw new Error("Staff records could not be loaded.")
+}
   const staff = (staffRows ?? []) as unknown as Staff[]
   const invites = (inviteRows ?? []) as unknown as Invitation[]
   const canManageRoles = membership.permissions.includes("manage_roles")
