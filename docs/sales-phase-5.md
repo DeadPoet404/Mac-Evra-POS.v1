@@ -1,6 +1,8 @@
 # Phase 5 — persistent customers and sales
 
-Phase 5 replaces the employee sale preview and manager sample transaction register with store-scoped Supabase records. It does **not** implement payment collection, payment verification, receipt issuance, inventory fulfilment, or a paid/completed sale state.
+> Historical phase boundary: Phase 6 now supersedes the employee route order and adds manual payment-backed completion. See `docs/manual-payments-phase-6.md` for current behavior. This document preserves the Phase 5 design that Phase 6 extends without rewriting.
+
+Phase 5 replaced the employee sale preview and manager sample transaction register with store-scoped Supabase records. It did **not** implement payment collection, payment verification, receipt issuance, inventory fulfilment, or a paid/completed sale state.
 
 ## Data model
 

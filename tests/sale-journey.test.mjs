@@ -10,13 +10,13 @@ import {
 
 const saleId = "65000000-0000-4000-8000-000000000001"
 
-test("the simplified employee journey uses four focused sale routes", () => {
+test("the employee journey uses the exact IMEI, payment, customer, complete route order", () => {
   assert.deepEqual(
-    ["imei", "customer", "review", "status"].map((step) => employeeSaleStepHref(step, saleId)),
+    ["imei", "payment", "customer", "complete"].map((step) => employeeSaleStepHref(step, saleId)),
     [
       `/new-sale?sale=${saleId}`,
+      `/new-sale/payment?sale=${saleId}`,
       `/new-sale/customer-info?sale=${saleId}`,
-      `/new-sale/checkout?sale=${saleId}`,
       `/new-sale/complete?sale=${saleId}`,
     ]
   )
@@ -30,11 +30,12 @@ test("sale journey links safely encode persisted sale identifiers", () => {
   assert.equal(employeeSaleStepHref("imei"), "/new-sale")
 })
 
-test("an unfinished sale resumes automatically without exposing a draft list", () => {
-  assert.equal(employeeSaleResumeStep(0, false), "imei")
-  assert.equal(employeeSaleResumeStep(1, false), "customer")
-  assert.equal(employeeSaleResumeStep(1, true), "review")
-  assert.equal(employeeSaleResumeStep(2, true), "imei")
+test("an unfinished sale resumes from persisted payment and customer progress", () => {
+  assert.equal(employeeSaleResumeStep(0, false, false), "imei")
+  assert.equal(employeeSaleResumeStep(1, false, false), "payment")
+  assert.equal(employeeSaleResumeStep(1, true, false), "customer")
+  assert.equal(employeeSaleResumeStep(1, true, true), "complete")
+  assert.equal(employeeSaleResumeStep(2, true, true), "imei")
 })
 
 test("IMEI entry removes formatting without hiding extra digits", () => {

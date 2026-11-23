@@ -1,7 +1,7 @@
 import "server-only"
 
 import { createClient } from "@/lib/supabase/server"
-import { matchesCustomerSearch, type SaleStatus } from "@/lib/sales"
+import { matchesCustomerSearch, type PaymentMethod, type SaleStatus } from "@/lib/sales"
 
 export type SaleCustomer = {
   id: string
@@ -26,6 +26,18 @@ export type SaleItem = {
   reservationExpiresAt: string | null
 }
 
+export type SalePayment = {
+  id: string
+  saleId: string
+  amountPesewas: number
+  currency: "GHS"
+  method: PaymentMethod
+  transactionReference: string | null
+  status: "confirmed"
+  confirmerName: string
+  confirmedAt: string
+}
+
 export type PersistentSale = {
   id: string
   saleNumber: string
@@ -41,11 +53,13 @@ export type PersistentSale = {
   currency: "GHS"
   expiresAt: string
   submittedAt: string | null
+  completedAt: string | null
   cancelledAt: string | null
   cancellationReason: string | null
   createdAt: string
   updatedAt: string
   items: SaleItem[]
+  payment: SalePayment | null
 }
 
 type RawSale = {
@@ -62,6 +76,7 @@ type RawSale = {
   currency: unknown
   expires_at: unknown
   submitted_at: unknown
+  completed_at: unknown
   cancelled_at: unknown
   cancellation_reason: unknown
   created_at: unknown
@@ -89,6 +104,18 @@ type RawItem = {
   status: unknown
 }
 
+type RawPayment = {
+  id: unknown
+  sale_id: unknown
+  amount_pesewas: unknown
+  currency: unknown
+  payment_method: unknown
+  transaction_reference: unknown
+  status: unknown
+  confirmed_by_display_name: unknown
+  confirmed_at: unknown
+}
+
 const saleSelection = [
   "id",
   "sale_number",
@@ -103,6 +130,7 @@ const saleSelection = [
   "currency",
   "expires_at",
   "submitted_at",
+  "completed_at",
   "cancelled_at",
   "cancellation_reason",
   "created_at",
@@ -159,13 +187,37 @@ function mapItem(
   }
 }
 
+function mapPayment(value: RawPayment): SalePayment {
+  const method = requiredString(value.payment_method, "payment method")
+  if (!(["mobile_money", "cash", "bank_transfer"] as string[]).includes(method)) {
+    throw new Error("Sale response has an unsupported payment method.")
+  }
+  const currency = requiredString(value.currency, "payment currency")
+  if (currency !== "GHS") throw new Error("Sale response has an unsupported payment currency.")
+  const status = requiredString(value.status, "payment status")
+  if (status !== "confirmed") throw new Error("Sale response has an unsupported payment status.")
+
+  return {
+    id: requiredString(value.id, "payment ID"),
+    saleId: requiredString(value.sale_id, "payment sale ID"),
+    amountPesewas: requiredInteger(value.amount_pesewas, "payment amount"),
+    currency: "GHS",
+    method: method as PaymentMethod,
+    transactionReference: optionalString(value.transaction_reference),
+    status: "confirmed",
+    confirmerName: requiredString(value.confirmed_by_display_name, "payment confirmer"),
+    confirmedAt: requiredString(value.confirmed_at, "payment confirmation timestamp"),
+  }
+}
+
 function mapSale(
   value: RawSale,
   customers: Map<string, SaleCustomer>,
-  items: Map<string, SaleItem[]>
+  items: Map<string, SaleItem[]>,
+  payments: Map<string, SalePayment>
 ): PersistentSale {
   const status = requiredString(value.status, "status")
-  if (!(["draft", "awaiting_payment", "cancelled"] as string[]).includes(status)) {
+  if (!(["draft", "awaiting_payment", "completed", "cancelled"] as string[]).includes(status)) {
     throw new Error("Sale response has an unsupported status.")
   }
   const currency = requiredString(value.currency, "currency")
@@ -188,11 +240,13 @@ function mapSale(
     currency: "GHS",
     expiresAt: requiredString(value.expires_at, "expiry"),
     submittedAt: optionalString(value.submitted_at),
+    completedAt: optionalString(value.completed_at),
     cancelledAt: optionalString(value.cancelled_at),
     cancellationReason: optionalString(value.cancellation_reason),
     createdAt: requiredString(value.created_at, "created timestamp"),
     updatedAt: requiredString(value.updated_at, "updated timestamp"),
     items: items.get(id) ?? [],
+    payment: payments.get(id) ?? null,
   }
 }
 
@@ -202,7 +256,7 @@ async function hydrateSales(rawSales: RawSale[]) {
   const saleIds = rawSales.map((sale) => requiredString(sale.id, "ID"))
   const customerIds = [...new Set(rawSales.map((sale) => optionalString(sale.customer_id)).filter((id): id is string => Boolean(id)))]
 
-  const [customerResult, itemResult] = await Promise.all([
+  const [customerResult, itemResult, paymentResult] = await Promise.all([
     customerIds.length
       ? supabase.from("customers").select("id,full_name,phone,email,notes").in("id", customerIds)
       : Promise.resolve({ data: [], error: null }),
@@ -211,9 +265,15 @@ async function hydrateSales(rawSales: RawSale[]) {
       .select("id,sale_id,device_id,reservation_id,product_description,imei,unit_price_pesewas,discount_pesewas,line_total_pesewas,status")
       .in("sale_id", saleIds)
       .order("created_at", { ascending: true }),
+    supabase
+      .from("sale_payments")
+      .select("id,sale_id,amount_pesewas,currency,payment_method,transaction_reference,status,confirmed_by_display_name,confirmed_at")
+      .in("sale_id", saleIds),
   ])
 
-  if (customerResult.error || itemResult.error) throw new Error("Sale details could not be loaded.")
+  if (customerResult.error || itemResult.error || paymentResult.error) {
+    throw new Error("Sale details could not be loaded.")
+  }
 
   const rawItems = (itemResult.data ?? []) as unknown as RawItem[]
   const reservationIds = [...new Set(rawItems.map((item) => requiredString(item.reservation_id, "reservation ID")))]
@@ -244,8 +304,14 @@ async function hydrateSales(rawSales: RawSale[]) {
     saleItems.push(item)
     items.set(item.saleId, saleItems)
   }
+  const payments = new Map(
+    ((paymentResult.data ?? []) as unknown as RawPayment[]).map((row) => {
+      const payment = mapPayment(row)
+      return [payment.saleId, payment]
+    })
+  )
 
-  return rawSales.map((sale) => mapSale(sale, customers, items))
+  return rawSales.map((sale) => mapSale(sale, customers, items, payments))
 }
 
 export async function listEmployeeSales(storeId: string, userId: string) {
@@ -255,7 +321,7 @@ export async function listEmployeeSales(storeId: string, userId: string) {
     .select(saleSelection)
     .eq("store_id", storeId)
     .eq("created_by_user_id", userId)
-    .in("status", ["draft", "awaiting_payment"])
+    .or("status.in.(draft,awaiting_payment),and(status.eq.completed,customer_id.is.null)")
     .order("updated_at", { ascending: false })
     .limit(50)
   if (error) throw new Error("Sale drafts could not be loaded.")

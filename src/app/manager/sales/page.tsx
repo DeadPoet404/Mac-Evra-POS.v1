@@ -16,7 +16,7 @@ function validDate(value: string | undefined) {
 }
 
 function StatusBadge({ status }: { status: SaleStatus }) {
-  const tone = status === "awaiting_payment" ? "amber" : status === "cancelled" ? "neutral" : "blue"
+  const tone = status === "completed" ? "green" : status === "awaiting_payment" ? "amber" : status === "cancelled" ? "neutral" : "blue"
   return <DataBadge tone={tone}>{saleStatusLabel(status)}</DataBadge>
 }
 
@@ -50,26 +50,27 @@ export default async function SalesPage({
   const drafts = sales.filter((sale) => sale.status === "draft")
   const awaiting = sales.filter((sale) => sale.status === "awaiting_payment")
   const cancelled = sales.filter((sale) => sale.status === "cancelled")
-  const pipelineValue = [...drafts, ...awaiting].reduce((sum, sale) => sum + sale.totalPesewas, 0)
+  const completed = sales.filter((sale) => sale.status === "completed" && sale.payment?.status === "confirmed")
+  const revenue = completed.reduce((sum, sale) => sum + (sale.payment?.amountPesewas ?? 0), 0)
 
   return (
     <main className="mx-auto w-full max-w-[1500px] space-y-7 p-4 sm:p-6 lg:p-8">
       <PageHeader
-        eyebrow="Persistent pre-payment register"
+        eyebrow="Persistent sales register"
         title="Sales"
-        description={`Review real drafts and awaiting-payment sales for ${membership.storeName}. Phase 5 contains no paid or completed transactions.`}
+        description={`Review real sale and manual payment records for ${membership.storeName}.`}
       />
 
-      <div className="flex gap-3 rounded-2xl border border-[#F2E2BD] bg-[#FFF9EB] p-4 text-sm leading-6 text-[#765613]">
+      <div className="flex gap-3 rounded-2xl border border-[#CDE9D7] bg-[#F0FAF3] p-4 text-sm leading-6 text-[#267343]">
         <CircleAlert className="mt-0.5 size-5 shrink-0" />
-        <p>Amounts are sale pipeline values, not revenue or verified collections. Inventory remains reserved until a later payment-finalisation phase.</p>
+        <p>Only sales with both a completed state and persisted confirmed payment are counted as revenue. Draft and awaiting-payment amounts are excluded.</p>
       </div>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Sale pipeline metrics">
+      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Sale metrics">
         <MetricCard label="Open drafts" value={String(drafts.length)} note="Employee-owned editable drafts" icon={ReceiptText} />
-        <MetricCard label="Awaiting payment" value={String(awaiting.length)} note="No payment verification yet" icon={Clock3} tone="amber" />
-        <MetricCard label="Pipeline value" value={formatPesewas(pipelineValue)} note="Draft plus awaiting-payment totals" icon={ShoppingBag} tone="blue" />
-        <MetricCard label="Cancelled" value={String(cancelled.length)} note="Reservations released where active" icon={XCircle} />
+        <MetricCard label="Awaiting payment" value={String(awaiting.length)} note="Not counted as revenue" icon={Clock3} tone="amber" />
+        <MetricCard label="Completed" value={String(completed.length)} note={`${cancelled.length} cancelled sale${cancelled.length === 1 ? "" : "s"}`} icon={ShoppingBag} tone="green" />
+        <MetricCard label="Revenue" value={formatPesewas(revenue)} note="Completed paid sales only" icon={ShoppingBag} tone="green" />
       </section>
 
       <Card className="rounded-2xl border-[#E8E8ED] bg-white shadow-none">
@@ -84,6 +85,7 @@ export default async function SalesPage({
                 <option value="">All statuses</option>
                 <option value="draft">Draft</option>
                 <option value="awaiting_payment">Awaiting payment</option>
+                <option value="completed">Completed</option>
                 <option value="cancelled">Cancelled</option>
               </select>
             </label>
@@ -142,6 +144,7 @@ export default async function SalesPage({
                 {selected.items.filter((item) => item.status === "active").map((item) => <div key={item.id} className="rounded-xl bg-[#F7F7F8] p-3"><p className="text-sm font-medium">{item.description}</p><p className="mt-1 font-mono text-[11px] text-[#86868B]">{item.imei}</p><div className="mt-2 flex justify-between gap-3 text-xs"><span className="text-[#86868B]">Reservation {item.reservationStatus ?? "unknown"}</span><span className="font-semibold">{formatPesewas(item.lineTotalPesewas)}</span></div></div>)}
               </div>
               <div className="mt-5 space-y-3 border-t border-[#E8E8ED] pt-5 text-sm"><Total label="Subtotal" value={formatPesewas(selected.subtotalPesewas)} /><Total label="Discount" value={formatPesewas(selected.discountPesewas)} /><Total label="Total" value={formatPesewas(selected.totalPesewas)} strong /></div>
+              {selected.payment ? <div className="mt-5 space-y-2 rounded-xl border border-[#CDE9D7] bg-[#F0FAF3] p-3 text-xs text-[#267343]"><p className="font-semibold">Confirmed {selected.payment.method.replaceAll("_", " ")} payment</p><p>{formatPesewas(selected.payment.amountPesewas)} · {dateTime(selected.payment.confirmedAt)}</p><p>Confirmed by {selected.payment.confirmerName}</p>{selected.payment.transactionReference ? <p className="break-words">Reference: {selected.payment.transactionReference}</p> : null}</div> : null}
               {selected.status === "awaiting_payment" ? <p className="mt-5 rounded-xl border border-[#F2E2BD] bg-[#FFF9EB] p-3 text-xs leading-5 text-[#765613]">No payment is recorded. Do not treat this amount as revenue or release inventory.</p> : null}
             </CardContent>
           </Card>

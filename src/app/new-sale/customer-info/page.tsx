@@ -25,25 +25,31 @@ export default async function CustomerInfoPage({
   const sale = params.sale ? await getPersistentSale(membership.storeId, params.sale) : null
 
   if (sale && params.notice && successNotices.has(params.notice)) {
-    redirect(employeeSaleStepHref("review", sale.id))
+    redirect(employeeSaleStepHref("complete", sale.id))
   }
-  if (sale && sale.status !== "draft") {
-    redirect(employeeSaleStepHref("status", sale.id))
+  if (sale?.status === "cancelled") {
+    redirect(employeeSaleStepHref("complete", sale.id))
+  }
+  if (sale && (sale.status !== "completed" || sale.payment?.status !== "confirmed")) {
+    redirect(employeeSaleStepHref("payment", sale.id))
+  }
+  if (sale?.customer) {
+    redirect(employeeSaleStepHref("complete", sale.id))
   }
 
   const activeItems = sale?.items.filter((item) => item.status === "active") ?? []
   if (sale && activeItems.length !== 1) {
-    redirect(employeeSaleStepHref("imei", sale.id))
+    redirect(employeeSaleStepHref("complete", sale.id))
   }
   const item = activeItems[0]
 
   return (
     <main className="min-h-screen bg-[#FAFAFC] pb-16 text-[#1D1D1F]">
-      <EmployeeHeader title="Customer" backHref={sale ? employeeSaleStepHref("imei", sale.id) : "/new-sale"} backLabel="Back" />
+      <EmployeeHeader title="Customer" backHref={sale ? employeeSaleStepHref("payment", sale.id) : "/new-sale"} backLabel="Back" />
       <div className="mx-auto w-full max-w-2xl px-5 pt-9 sm:px-6">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#86868B]">Step 2 of 4</p>
+        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#86868B]">Step 3 of 4</p>
         <h1 className="mt-2 text-[38px] font-semibold tracking-[-1.2px] text-[#6E0728] sm:text-[44px]">Customer details.</h1>
-        <p className="mt-2 text-base text-[#68686D]">Add the customer receiving this device.</p>
+        <p className="mt-2 text-base text-[#68686D]">Payment is recorded. Add the customer receiving this device.</p>
 
         {params.error && errors[params.error] ? <p role="alert" className="mt-6 rounded-2xl border border-[#E8C9D2] bg-[#FCF4F6] px-5 py-4 text-sm font-medium text-[#6E0728]">{errors[params.error]}</p> : null}
 

@@ -4,11 +4,11 @@ Mac Evra POS is an employee-assisted iPhone retail point-of-sale interface for a
 
 ## Current status
 
-Phases 1–4 provide the Supabase identity/RBAC foundation, persistent physical inventory and reservations, authenticated employee access, secure invitations, and audited employee management.
+Phases 1–5 provide the Supabase identity/RBAC foundation, persistent physical inventory and reservations, authenticated employee access, secure invitations and employee management, persistent customers, and reservation-backed one-device sale drafts with trusted integer-pesewa totals.
 
-Phase 5 adds persistent store-scoped customers, employee-owned sale drafts, immutable IMEI-level sale-item snapshots, trusted integer-pesewa totals, reservation-backed draft editing/cancellation, and a real manager sale register. The browser never supplies authoritative prices, totals, stores, actors, or permissions. The Phase 5 migration is prepared for review and has **not** been applied to hosted Supabase.
+Phase 6 adds one immutable, manually confirmed full payment per sale and atomic completion. The database derives the store, employee, membership, permissions, item price, total, and inventory state from trusted records; the browser supplies only the sale identifier, one supported method, optional reference metadata, and explicit receipt attestation. One transaction records payment, fulfils the reservation, marks inventory sold, appends a sold movement, completes the sale, and writes attributed audit events.
 
-Payments remain deliberately unimplemented. A Phase 5 sale can only be `draft`, `awaiting_payment`, or `cancelled`; it cannot be paid or completed, and checkout never marks inventory sold. Trade-ins, refunds, receipts, payment reconciliation, and aggregate reporting remain later-phase or demonstration functionality.
+The employee route order is exactly IMEI → Payment → Customer details → Sale complete. Split/partial payments, gateways, automatic provider verification, refunds, reversals, receipts, trade-in settlement, reconciliation, and aggregate reporting remain excluded or later-phase functionality. The Phase 6 migration is prepared for review and has **not** been applied to hosted Supabase.
 
 ### Employee routes
 
@@ -18,11 +18,11 @@ Payments remain deliberately unimplemented. A Phase 5 sale can only be `draft`, 
 | `/home` | Employee home and workflow navigation |
 | `/inventory` | Search real RLS-scoped IMEI-level inventory |
 | `/trade-in` | Six-step trade-in and replacement-device preview |
-| `/new-sale` | Create, save, resume, edit, expire, and cancel persistent sale drafts |
-| `/new-sale/customer-info` | Search, select, create, or clear a persistent customer |
-| `/new-sale/checkout` | Review trusted totals and submit only to awaiting payment |
-| `/new-sale/payment` | Explicit Phase 6 boundary; accepts no payment input |
-| `/new-sale/complete` | Awaiting-payment status with no paid/completed claim |
+| `/new-sale` | Verify one IMEI and persist its reservation-backed sale |
+| `/new-sale/payment` | Show the trusted total and manually confirm one full payment |
+| `/new-sale/customer-info` | Capture customer details after successful payment recording |
+| `/new-sale/complete` | Show success only from persisted completed sale and payment state |
+| `/new-sale/checkout` | Legacy redirect to the payment step |
 
 ### Manager routes
 
@@ -45,7 +45,7 @@ The hosted project inspected for this repository is:
 - Region: `eu-west-1`
 - PostgreSQL: 17
 
-It was an empty, healthy Supabase project when first inspected. Later read-only verification found Phases 1–3 recorded, custom SMTP configured, and an intentional first-administrator bootstrap. Phase 4 and Phase 5 hosted migration state must be checked with `supabase migration list --linked` before any owner-approved push; this implementation did not change hosted state.
+It was an empty, healthy Supabase project when first inspected. Later read-only verification found Phases 1–3 recorded, custom SMTP configured, and an intentional first-administrator bootstrap. Phase 4–6 hosted migration state must be checked with `supabase migration list --linked` before any owner-approved push; this implementation did not change hosted state.
 
 Backend files:
 
@@ -54,15 +54,18 @@ Backend files:
 - `supabase/migrations/20261123120000_phase_02_inventory.sql` — applied persistent physical inventory, history, reservation lifecycle, atomic RPCs, grants, and RLS
 - `supabase/migrations/20261123180000_phase_03_employee_auth.sql` — invitation preparation and acceptance functions
 - `supabase/migrations/20261123200000_phase_04_employee_management.sql` — audited store membership management
-- `supabase/migrations/20261123220000_phase_05_sales_customers.sql` — review-only persistent customers, sale drafts, item snapshots, secure RPCs, grants, and RLS; not applied remotely
+- `supabase/migrations/20261123220000_phase_05_sales_customers.sql` — persistent customers, sale drafts, item snapshots, secure RPCs, grants, and RLS
+- `supabase/migrations/20261123235900_phase_06_manual_payments.sql` — review-only immutable manual payments, atomic completion, grants, and forced RLS; not applied remotely
 - `supabase/seed.sql` — one clearly labelled local development store; no users, credentials, inventory, customers, sales, or financial records
 - `supabase/tests/001_foundation_rls.test.sql` — pgTAP foundation policy tests
 - `supabase/tests/002_inventory_reservations.test.sql` — pgTAP inventory integrity and reservation tests
 - `supabase/tests/003_employee_auth.test.sql` — pgTAP invitation, role-assignment, suspension, and anonymous-access tests
 - `supabase/tests/004_employee_management.test.sql` — pgTAP employee access-management tests
 - `supabase/tests/005_sales_customers.test.sql` — pgTAP customer, sale, reservation, isolation, total, discount, cancellation, and audit tests
+- `supabase/tests/006_manual_payments.test.sql` — pgTAP manual payment, completion, isolation, fulfilment, immutability, and audit tests
 - `scripts/test-inventory-concurrency.mjs` — local-only two-client reservation contention test
 - `scripts/test-sales-concurrency.mjs` — local-only competing sale-draft reservation/item test
+- `scripts/test-payment-concurrency.mjs` — local-only duplicate payment-confirmation race test
 - `scripts/test-auth-concurrency.mjs` — deterministic local invitation-acceptance versus profile-suspension lock test
 - `scripts/test-auth-sessions.mjs` — local-only email/password, actual captured invitation email, SSR confirmation, password setup, existing-account, and separate-session access test
 - `supabase/templates/` — direct invite and magic-link templates that preserve the complete invitation-specific confirmation parameters
@@ -74,7 +77,7 @@ Backend files:
 - `src/lib/inventory-server.ts` — authenticated server-only inventory reads and reservation RPC wrappers
 - `src/lib/supabase/proxy.ts` and `src/proxy.ts` — Next.js 16 session refresh and route enforcement
 
-See `docs/supabase-foundation.md`, `docs/inventory-phase-2.md`, `docs/employee-auth-phase-3.md`, and `docs/sales-phase-5.md` for security, transaction, deployment, and operational boundaries.
+See `docs/supabase-foundation.md`, `docs/inventory-phase-2.md`, `docs/employee-auth-phase-3.md`, `docs/sales-phase-5.md`, and `docs/manual-payments-phase-6.md` for security, transaction, deployment, and operational boundaries.
 
 ## Local setup
 
@@ -162,6 +165,7 @@ npm run db:lint
 npm run db:test
 npm run db:test:inventory-concurrency
 npm run db:test:sales-concurrency
+npm run db:test:payment-concurrency
 npm run db:test:auth-concurrency
 npm run db:test:auth-sessions
 ```
@@ -188,10 +192,13 @@ The database commands require the local Supabase Docker stack. The concurrency t
 - Password sign-in never consumes invitations; email confirmation accepts one invitation ID using a random database-hashed token and a verified Auth email.
 - Profile and store rows remain locked through invitation acceptance so suspension or deactivation cannot race membership creation.
 - Repeated invitation preparation rotates the acceptance token, and each preparation and provider delivery result has a separate audit event.
-- Persistent sale drafts use trusted inventory prices and reservations; no payment, paid/completed sale, receipt, revenue, or sold-inventory state is introduced by Phase 5.
+- Sale completion requires one exact, positive integer-pesewa payment, a supported method, explicit employee receipt attestation, an active owned reservation, and the atomic payment/fulfilment/sold/audit transaction.
+- Manual payment rows are one-per-sale, forced-RLS protected, append-only, and readable only by the sale employee or an authorised same-store manager.
+- A payment reference remains optional employee-entered metadata and is never represented as provider verification.
+- The completion route queries persisted sale and payment state and rejects draft, awaiting-payment, cancelled, missing, inaccessible, and payment-less records as success.
 
 ## Important production blockers
 
-Later phases must add persistent customers, authenticated UI integration, trusted inventory intake/adjustment commands, transactional sales, trusted split-payment confirmation, trade-in inspection/valuation/approval, receipts, refunds, returns, reporting, provider reconciliation, monitoring, backups, and end-to-end tests.
+Later phases must add trusted inventory intake/adjustment commands, trade-in inspection/valuation/approval, receipts, refunds, returns, provider reconciliation, broader reporting, monitoring, backups, and end-to-end browser tests.
 
-Employee-entered payment references, UI inspection results, and preview approval decisions remain unverified demonstration data until those trusted workflows are implemented.
+Manual payment references, UI inspection results, and preview approval decisions are not automatic third-party verification. Any provider-backed payment flow requires a separate reviewed integration and reconciliation model.

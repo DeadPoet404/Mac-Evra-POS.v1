@@ -4,7 +4,8 @@ import { revalidatePath } from "next/cache"
 import { redirect } from "next/navigation"
 
 import { requirePermissions } from "@/lib/auth/server"
-import { normalizeCustomerInput, parseGhsToPesewas } from "@/lib/sales"
+import { normalizeCustomerInput, parseGhsToPesewas, parsePaymentMethod } from "@/lib/sales"
+import { getPersistentSale } from "@/lib/sales-server"
 import { createClient } from "@/lib/supabase/server"
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -23,6 +24,7 @@ function firstRow(value: unknown) {
 
 function refreshSalePages() {
   revalidatePath("/new-sale")
+  revalidatePath("/new-sale/payment")
   revalidatePath("/new-sale/customer-info")
   revalidatePath("/new-sale/checkout")
   revalidatePath("/new-sale/complete")
@@ -125,12 +127,11 @@ export async function createSaleCustomerAction(formData: FormData) {
     redirect(`/new-sale/customer-info?sale=${encodeURIComponent(saleId)}&error=invalid-customer`)
   }
   const supabase = await createClient()
-  const { data, error } = await supabase.rpc("create_sale_customer", {
+  const { data, error } = await supabase.rpc("create_completed_sale_customer", {
     p_sale_id: saleId,
     p_full_name: customer!.fullName,
     p_phone: customer!.phone,
     p_email: customer!.email || null,
-    p_notes: customer!.notes || null,
   })
   const result = firstRow(data)?.result
   if (error) redirect(`/new-sale/customer-info?sale=${encodeURIComponent(saleId)}&error=customer-create-failed`)
@@ -138,14 +139,41 @@ export async function createSaleCustomerAction(formData: FormData) {
   redirect(`/new-sale/customer-info?sale=${encodeURIComponent(saleId)}&notice=${result === "existing" ? "customer-existing" : "customer-created"}`)
 }
 
-export async function submitSaleForPaymentAction(formData: FormData) {
-  await requirePermissions(["create_sales"], { nextPath: "/new-sale/checkout" })
+export async function confirmSalePaymentAction(formData: FormData) {
+  const { membership } = await requirePermissions(["create_sales", "reserve_inventory"], {
+    nextPath: "/new-sale/payment",
+  })
   const saleId = formUuid(formData, "saleId")
+  let method
+  try {
+    method = parsePaymentMethod(formData.get("paymentMethod"))
+  } catch {
+    redirect(`/new-sale/payment?sale=${encodeURIComponent(saleId)}&error=invalid-method`)
+  }
+  if (formData.get("receivedConfirmed") !== "yes") {
+    redirect(`/new-sale/payment?sale=${encodeURIComponent(saleId)}&error=attestation-required`)
+  }
+  const reference = String(formData.get("transactionReference") ?? "").trim().replace(/\s+/g, " ")
+  if (reference.length > 160) {
+    redirect(`/new-sale/payment?sale=${encodeURIComponent(saleId)}&error=invalid-reference`)
+  }
+
+  const sale = await getPersistentSale(membership.storeId, saleId)
+  if (!sale || sale.totalPesewas <= 0 || sale.payment) {
+    redirect(`/new-sale/payment?sale=${encodeURIComponent(saleId)}&error=payment-failed`)
+  }
+
   const supabase = await createClient()
-  const { error } = await supabase.rpc("submit_sale_for_payment", { p_sale_id: saleId })
-  if (error) redirect(`/new-sale/checkout?sale=${encodeURIComponent(saleId)}&error=submit-failed`)
+  const { error } = await supabase.rpc("confirm_sale_payment", {
+    p_sale_id: saleId,
+    p_payment_method: method!,
+    p_amount_pesewas: sale.totalPesewas,
+    p_transaction_reference: reference || null,
+    p_received_confirmed: true,
+  })
+  if (error) redirect(`/new-sale/payment?sale=${encodeURIComponent(saleId)}&error=payment-failed`)
   refreshSalePages()
-  redirect(`/new-sale/complete?sale=${encodeURIComponent(saleId)}`)
+  redirect(`/new-sale/customer-info?sale=${encodeURIComponent(saleId)}&notice=payment-recorded`)
 }
 
 export async function cancelSaleAction(formData: FormData) {
