@@ -1,9 +1,11 @@
 "use client"
 
+import { initialAuthActionState } from "@/app/auth/action-state"
+
 import { useActionState } from "react"
 import { LoaderCircle, LockKeyhole, Mail } from "lucide-react"
 
-import { initialAuthActionState, signInAction } from "@/app/auth/actions"
+import { signInAction } from "@/app/auth/actions"
 
 export function LoginForm({ nextPath, initialMessage }: { nextPath: string; initialMessage?: string }) {
   const [state, formAction, pending] = useActionState(signInAction, initialAuthActionState)

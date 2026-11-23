@@ -5,13 +5,7 @@ import { redirect } from "next/navigation"
 import { authorizedPostSignInPath, publicAuthErrorMessage } from "@/lib/auth/policy"
 import { resolveAccess } from "@/lib/auth/resolve"
 import { createClient } from "@/lib/supabase/server"
-
-export type AuthActionState = {
-  status: "idle" | "error"
-  message: string
-}
-
-export const initialAuthActionState: AuthActionState = { status: "idle", message: "" }
+import type { AuthActionState } from "@/app/auth/action-state"
 
 function normalizedEmail(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim().toLowerCase() : ""
