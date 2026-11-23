@@ -124,7 +124,22 @@ jobs:
         run: npm run db:test:sales-concurrency
 
       - name: Run payment confirmation concurrency tests
-        run: npm run db:test:payment-concurrency
+        shell: bash
+        run: |
+          set +e
+          npm run db:test:payment-concurrency 2>&1 | tee /tmp/payment-concurrency-test.log
+          status=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            details=$(tail -n 80 /tmp/payment-concurrency-test.log)
+            details=${details//'%'/'%25'}
+            details=${details//$'\r'/'%0D'}
+            details=${details//$'\n'/'%0A'}
+            echo "::error title=Payment concurrency integration failure::$details"
+          fi
+
+          exit "$status"
 
       - name: Run invitation suspension concurrency tests
         run: npm run db:test:auth-concurrency
