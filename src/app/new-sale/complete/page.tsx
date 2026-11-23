@@ -37,10 +37,10 @@ export default async function SaleCompletePage({
       <section className="mx-auto w-full max-w-2xl px-5 pt-12 sm:px-6">
         {sale && presentation ? (
           <>
-            <div className={`mx-auto flex size-16 items-center justify-center rounded-full ${iconStyle}`}><StatusIcon size={30} /></div>
+            <p className="text-center text-[11px] font-semibold uppercase tracking-[0.16em] text-[#86868B]">Step 4 of 4</p>
+            <div className={`mx-auto mt-4 flex size-16 items-center justify-center rounded-full ${iconStyle}`}><StatusIcon size={30} /></div>
             <div className="mt-6 text-center">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#86868B]">{presentation.eyebrow}</p>
-              <h1 className="mt-3 text-[34px] font-semibold tracking-[-1px] text-[#6E0728]">{presentation.title}</h1>
+              <h1 className="text-[34px] font-semibold tracking-[-1px] text-[#6E0728]">{presentation.title}</h1>
               <p className="mx-auto mt-3 max-w-xl text-sm leading-6 text-[#86868B]">{presentation.description}</p>
             </div>
 
@@ -65,7 +65,6 @@ export default async function SaleCompletePage({
                       <div className="min-w-0 flex-1">
                         <p className="font-medium">{item.description}</p>
                         <p className="mt-1 font-mono text-xs text-[#86868B]">IMEI {item.imei}</p>
-                        {sale.status === "cancelled" ? <p className="mt-1 text-xs text-[#68686D]">Reservation: {item.reservationStatus ?? "not active"}</p> : null}
                       </div>
                       <p className="shrink-0 text-sm font-semibold">{formatPesewas(item.lineTotalPesewas)}</p>
                     </div>
