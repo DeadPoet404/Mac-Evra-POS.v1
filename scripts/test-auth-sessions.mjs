@@ -1,6 +1,7 @@
 import assert from "node:assert/strict"
 import { randomBytes, randomUUID } from "node:crypto"
 
+import { createServerClient } from "@supabase/ssr"
 import { createClient } from "@supabase/supabase-js"
 
 import {
@@ -173,19 +174,44 @@ async function confirmEmailedInvitation(email, prepared, expectedType) {
   assert.equal(emailedUrl.searchParams.has("store_id"), false)
   assert.equal(emailedUrl.searchParams.has("role_id"), false)
 
-  const session = createBrowserSession()
-  const { error: verifyError } = await session.auth.verifyOtp({
-    token_hash: confirmation.tokenHash,
-    type: confirmation.type,
-  })
-  requireNoError(verifyError, `Verify ${expectedType} email`)
+  // Exercise the real Next.js confirmation route. It verifies the Supabase OTP,
+  // accepts exactly one database invitation, writes SSR session cookies, and
+  // chooses password setup only for a newly invited account.
+  const confirmationResponse = await fetch(emailedUrl, { redirect: "manual" })
+  assert.ok([303, 307].includes(confirmationResponse.status))
+  const location = confirmationResponse.headers.get("location")
+  assert.ok(location)
+  const destination = new URL(location, localAppUrl)
+  assert.equal(destination.pathname, expectedType === "invite" ? "/auth/set-password" : "/home")
 
-  const { data: accepted, error: acceptanceError } = await session.rpc("accept_staff_invitation", {
-    p_invitation_id: confirmation.invitationId,
-    p_acceptance_token: confirmation.acceptanceToken,
+  const cookieJar = new Map()
+  const setCookies = confirmationResponse.headers.getSetCookie()
+  assert.ok(setCookies.length > 0, "confirmation route must establish an SSR session")
+  for (const header of setCookies) {
+    const pair = header.split(";", 1)[0]
+    const separator = pair.indexOf("=")
+    if (separator > 0) cookieJar.set(pair.slice(0, separator), pair.slice(separator + 1))
+  }
+
+  const session = createServerClient(url, publishableKey, {
+    cookies: {
+      getAll() {
+        return [...cookieJar].map(([name, value]) => ({ name, value }))
+      },
+      setAll(cookies) {
+        for (const cookie of cookies) cookieJar.set(cookie.name, cookie.value)
+      },
+    },
   })
-  requireNoError(acceptanceError, `Accept ${expectedType} invitation`)
-  assert.equal(accepted.length, 1)
+  const verified = await session.auth.getUser()
+  requireNoError(verified.error, `Read ${expectedType} SSR session`)
+  assert.ok(verified.data.user)
+
+  const destinationPage = await fetch(destination, {
+    headers: { cookie: [...cookieJar].map(([name, value]) => `${name}=${value}`).join("; ") },
+    redirect: "manual",
+  })
+  assert.equal(destinationPage.status, 200, `${destination.pathname} should render with the confirmation session`)
   return session
 }
 
