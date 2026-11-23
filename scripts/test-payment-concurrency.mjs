@@ -102,7 +102,7 @@ const saleId = draft.data[0].sale_id
 const added = await clients[0].rpc("add_sale_item", { p_sale_id: saleId, p_device_id: deviceId })
 noError(added.error, "Reserve payment race device")
 assert.equal(added.data[0].result, "added")
-const { data: item, error: itemError } = await admin
+const { data: item, error: itemError } = await clients[0]
   .from("sale_items")
   .select("reservation_id")
   .eq("sale_id", saleId)
@@ -147,7 +147,7 @@ assert.equal(payments[0].status, "confirmed")
 assert.equal(payments[0].confirmed_by_user_id, user.id)
 assert.equal(payments[0].confirmed_by_membership_id, membershipId)
 
-const { data: sale, error: saleError } = await admin
+const { data: sale, error: saleError } = await clients[0]
   .from("sales")
   .select("status,completed_at")
   .eq("id", saleId)
