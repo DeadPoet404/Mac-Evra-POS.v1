@@ -134,6 +134,8 @@ export default function TradeInPage() {
               {step === 5 ? "Review trade-in" : "Continue"} <ArrowRight size={16} />
             </button>
           </div>
+        ) : !submitted ? (
+          <button type="button" onClick={goBack} className="mt-5 flex items-center gap-1 rounded-full px-3 py-3 text-sm font-semibold text-[#6E0728]"><ArrowLeft size={16} /> Back to replacement</button>
         ) : null}
       </div>
     </main>
