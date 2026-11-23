@@ -1,8 +1,26 @@
 begin;
 
+create extension if not exists pgtap with schema extensions;
+
+-- Self-contained fixtures: each pgTAP file runs in its own transaction, so the
+-- store, manager and employee used by the RPC checks must be created here.
+insert into public.stores (id, code, name)
+values
+  ('00000000-0000-4000-8000-000000000009', 'iphone-catalogue-a', 'iPhone Catalogue A');
+
+insert into auth.users (id, email, email_confirmed_at, raw_user_meta_data)
+values
+  ('17000000-0000-4000-8000-000000000001', 'iphone.manager.a@local.test', statement_timestamp(), '{"full_name":"iPhone Catalogue Manager"}'),
+  ('17000000-0000-4000-8000-000000000003', 'iphone.employee@local.test', statement_timestamp(), '{"full_name":"iPhone Catalogue Employee"}');
+
+insert into public.store_memberships (id, store_id, user_id, role_id, status, joined_at)
+values
+  ('28000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000009', '17000000-0000-4000-8000-000000000001', '00000000-0000-4000-8000-000000000102', 'active', statement_timestamp()),
+  ('28000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000009', '17000000-0000-4000-8000-000000000003', '00000000-0000-4000-8000-000000000101', 'active', statement_timestamp());
+
 select plan(10);
 
--- 1. Every intended iPhone model/storage combination is registered (109 variants across 35 models).
+-- 1. Every intended iPhone model/storage combination is registered (111 variants across 35 models).
 select is(
   (
     select count(*)::integer

@@ -128,7 +128,7 @@ export async function addSupplierInvoiceLineAction(formData: FormData): Promise<
       p_supplier_sku: null,
     })
 
-    const registeredId = Array.isArray(regData) ? regData[0]?.catalogue_id : null
+    const registeredId = Array.isArray(regData) ? regData[0]?.model_catalogue_id : null
     if (regError || typeof registeredId !== "string" || !registeredId) {
       redirect(`${route}?error=${encodeURIComponent(regError?.message || "Could not prepare selected device model for this store.")}`)
     }
