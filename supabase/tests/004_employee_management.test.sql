@@ -78,12 +78,28 @@ select throws_ok(
  '42501', null,
  'Administrator cannot modify their own role'
 );
+reset role;
+update public.store_memberships
+set status = 'inactive'
+where id = '20000000-0000-4000-8000-000000000044';
+insert into public.membership_permission_overrides (
+  membership_id, permission_id, allowed, reason, granted_by
+) values (
+  '20000000-0000-4000-8000-000000000042',
+  '00000000-0000-4000-8000-000000000218',
+  true,
+  'Exercise last administrator safeguard',
+  '10000000-0000-4000-8000-000000000043'
+);
+set local role authenticated;
+select set_config('request.jwt.claim.sub', '10000000-0000-4000-8000-000000000042', true);
+select set_config('request.jwt.claims', '{"sub":"10000000-0000-4000-8000-000000000042","role":"authenticated"}', true);
 select throws_ok(
- $select public.update_staff_membership(
+ $$select public.update_staff_membership(
    '00000000-0000-4000-8000-000000000004',
-   '20000000-0000-4000-8000-000000000044',
+   '20000000-0000-4000-8000-000000000043',
    'employee', 'active'
- )$,
+ )$$,
  '23514', null,
  'The store cannot lose its last active administrator'
 );
