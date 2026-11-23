@@ -88,7 +88,7 @@ The current sign-in page was not connected because it offers Google and Apple wh
 
 ## Migration safety
 
-The repository migration is version-controlled but not applied to the hosted project. Local validation should use:
+The reviewed Phase 1 foundation migration was applied to the hosted project after explicit approval. Phase 2 remains review-only and has not been applied remotely. Local validation should use:
 
 ```bash
 npm run supabase:start
@@ -97,7 +97,7 @@ npm run db:lint
 npm run db:test
 ```
 
-After explicit approval, link and push migrations with:
+Only after separate approval for a reviewed migration, link and push with:
 
 ```bash
 npx supabase login
