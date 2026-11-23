@@ -5,13 +5,16 @@ import { useState } from "react"
 import {
   ArrowLeft,
   ArrowRight,
+  BadgeDollarSign,
   BatteryMedium,
   Check,
   CircleAlert,
   ClipboardCheck,
+  Minus,
   Search,
   ShieldCheck,
   Smartphone,
+  UserRound,
 } from "lucide-react"
 
 import { DeviceCard, SaleDeviceSummary } from "@/components/employee/device-card"
@@ -178,7 +181,7 @@ function CustomerStep({ value, onChange }: { value: TradeInCustomer; onChange: (
   return (
     <StepCard eyebrow="Step 1" title="Customer information" description="Record who is presenting the device for this trade-in preview.">
       <div className="grid gap-5 sm:grid-cols-2">
-        <TextField label="Full name" value={value.name} onChange={(name) => onChange({ ...value, name })} placeholder="Customer's full name" autoComplete="name" />
+        <TextField label="Full name" icon={UserRound} value={value.name} onChange={(name) => onChange({ ...value, name })} placeholder="Customer's full name" autoComplete="name" />
         <TextField label="Phone number" value={value.phone} onChange={(phone) => onChange({ ...value, phone })} placeholder="e.g. 024 000 0000" type="tel" autoComplete="tel" />
         <div className="sm:col-span-2">
           <TextField label="Email (optional)" value={value.email} onChange={(email) => onChange({ ...value, email })} placeholder="Customer's email address" type="email" autoComplete="email" />
@@ -242,7 +245,8 @@ function InspectionGroup({ label, value, options, onChange }: { label: string; v
       <legend className="mb-2 text-sm font-semibold">{label}</legend>
       <div className={`grid gap-2 ${options.length === 3 ? "grid-cols-3" : "grid-cols-2"}`}>
         {options.map((option) => (
-          <button key={option} type="button" onClick={() => onChange(option)} className={`rounded-xl border px-2 py-3 text-xs font-medium transition sm:text-sm ${value === option ? "border-[#6E0728] bg-[#FAF3F6] text-[#6E0728]" : "border-[#E5E5E7] bg-white text-[#68686D]"}`}>
+          <button key={option} type="button" onClick={() => onChange(option)} className={`inline-flex items-center justify-center gap-1.5 rounded-xl border px-2 py-3 text-xs font-medium transition sm:text-sm ${value === option ? "border-[#6E0728] bg-[#FAF3F6] text-[#6E0728]" : "border-[#E5E5E7] bg-white text-[#68686D]"}`}>
+            {value === option ? <Check size={14} strokeWidth={2} aria-hidden="true" /> : null}
             {option}
           </button>
         ))}
@@ -256,7 +260,7 @@ function ValuationStep({ device, inspection }: { device: TradeInDevice; inspecti
   return (
     <StepCard eyebrow="Step 4" title="Demo trade-in estimate" description="Review an illustrative valuation for interface testing. This is not an approved offer.">
       <div className="rounded-2xl bg-[#6E0728] p-5 text-white">
-        <p className="text-xs font-semibold uppercase tracking-[0.12em] text-white/65">Estimated trade-in value · Demo only</p>
+        <p className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.12em] text-white/65"><BadgeDollarSign size={16} strokeWidth={1.8} aria-hidden="true" /> Estimated trade-in value · Demo only</p>
         <p className="mt-3 text-4xl font-semibold tracking-[-1px]">{formatGhs(valuation.estimatedOffer)}</p>
         <p className="mt-2 text-xs leading-5 text-white/70">Pending manager review and all required ownership, IMEI, diagnostic and activation-lock checks.</p>
       </div>
@@ -283,7 +287,15 @@ function ValuationStep({ device, inspection }: { device: TradeInDevice; inspecti
 }
 
 function ValueRow({ label, amount, strong = false }: { label: string; amount: number; strong?: boolean }) {
-  return <div className={`flex items-center justify-between gap-4 text-sm ${strong ? "font-semibold" : ""}`}><span className={strong ? "text-[#1D1D1F]" : "text-[#68686D]"}>{label}</span><span className={amount < 0 ? "text-[#A13B34]" : ""}>{amount < 0 ? "−" : ""}{formatGhs(Math.abs(amount))}</span></div>
+  return (
+    <div className={`flex items-center justify-between gap-4 text-sm ${strong ? "font-semibold" : ""}`}>
+      <span className={strong ? "text-[#1D1D1F]" : "text-[#68686D]"}>{label}</span>
+      <span className={`inline-flex items-center gap-1 ${amount < 0 ? "text-[#A13B34]" : ""}`}>
+        {amount < 0 ? <Minus size={13} strokeWidth={2} aria-hidden="true" /> : null}
+        {formatGhs(Math.abs(amount))}
+      </span>
+    </div>
+  )
 }
 
 function ReplacementStep({ phones, search, onSearch, selected, onSelect, estimatedOffer }: { phones: Phone[]; search: string; onSearch: (value: string) => void; selected: Phone | null; onSelect: (phone: Phone) => void; estimatedOffer: number }) {
@@ -332,7 +344,7 @@ function SummaryStep({ customer, device, inspection, replacement, submitted, onS
         <SummaryCard title="Replacement device"><SaleDeviceSummary phone={replacement} className="border-0 bg-[#FAFAFC]" /></SummaryCard>
         <div className="rounded-2xl bg-[#F7F7F8] p-5">
           <SummaryRow label="Replacement price" value={formatGhs(replacement.price)} />
-          <SummaryRow label="Demo trade-in estimate" value={`− ${formatGhs(valuation.estimatedOffer)}`} />
+          <SummaryRow label="Demo trade-in estimate" value={<span className="inline-flex items-center gap-1"><Minus size={13} strokeWidth={2} aria-hidden="true" /> {formatGhs(valuation.estimatedOffer)}</span>} />
           <div className="mt-4 border-t border-[#E0E0E3] pt-4"><SummaryRow label="Remaining balance" value={formatGhs(remaining)} strong /></div>
         </div>
       </div>
@@ -355,10 +367,18 @@ function SummaryCard({ title, children }: { title: string; children: React.React
   return <div className="rounded-2xl border border-[#E5E5E7] p-4"><h3 className="mb-3 text-sm font-semibold">{title}</h3><div className="space-y-3">{children}</div></div>
 }
 
-function SummaryRow({ label, value, mono = false, strong = false }: { label: string; value: string; mono?: boolean; strong?: boolean }) {
+function SummaryRow({ label, value, mono = false, strong = false }: { label: string; value: React.ReactNode; mono?: boolean; strong?: boolean }) {
   return <div className={`flex items-start justify-between gap-4 text-sm ${strong ? "font-semibold" : ""}`}><span className="text-[#86868B]">{label}</span><span className={`max-w-[65%] break-words text-right ${mono ? "font-mono text-xs" : ""} ${strong ? "text-lg text-[#6E0728]" : "font-medium"}`}>{value}</span></div>
 }
 
-function TextField({ label, value, onChange, placeholder, type = "text", autoComplete, mono = false }: { label: string; value: string; onChange: (value: string) => void; placeholder: string; type?: string; autoComplete?: string; mono?: boolean }) {
-  return <label className="block"><span className="mb-2 block text-sm font-semibold">{label}</span><input type={type} autoComplete={autoComplete} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className={`h-12 w-full rounded-xl border border-[#E5E5E7] bg-[#FAFAFC] px-4 text-sm outline-none focus:border-[#6E0728] ${mono ? "font-mono" : ""}`} /></label>
+function TextField({ label, value, onChange, placeholder, type = "text", autoComplete, mono = false, icon: Icon }: { label: string; value: string; onChange: (value: string) => void; placeholder: string; type?: string; autoComplete?: string; mono?: boolean; icon?: React.ElementType }) {
+  return (
+    <label className="block">
+      <span className="mb-2 flex items-center gap-2 text-sm font-semibold">
+        {Icon ? <Icon size={16} strokeWidth={1.8} className="text-[#6E0728]" aria-hidden="true" /> : null}
+        {label}
+      </span>
+      <input type={type} autoComplete={autoComplete} value={value} onChange={(event) => onChange(event.target.value)} placeholder={placeholder} className={`h-12 w-full rounded-xl border border-[#E5E5E7] bg-[#FAFAFC] px-4 text-sm outline-none focus:border-[#6E0728] ${mono ? "font-mono" : ""}`} />
+    </label>
+  )
 }

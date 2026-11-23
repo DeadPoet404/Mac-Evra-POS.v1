@@ -24,7 +24,7 @@ export function DeviceCard({
       )}
     >
       <span className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-[#F5F5F7] text-[#6E0728] sm:size-16">
-        <Smartphone size={27} strokeWidth={1.4} aria-hidden="true" />
+        <Smartphone size={27} strokeWidth={1.5} aria-hidden="true" />
       </span>
       <span className="min-w-0 flex-1">
         <span className="flex flex-wrap items-center gap-2">
@@ -34,7 +34,7 @@ export function DeviceCard({
         <span className="mt-1 block truncate text-xs text-[#86868B]">{phone.storage} · {phone.colour}</span>
         <span className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[#68686D]">
           <span>{phone.condition}</span>
-          <span className="inline-flex items-center gap-1"><BatteryMedium size={13} /> {phone.battery}%</span>
+          <span className="inline-flex items-center gap-1"><BatteryMedium size={13} strokeWidth={1.8} aria-hidden="true" /> {phone.battery}%</span>
           <span className="font-medium text-[#6E0728]">{formatGhs(phone.price)}</span>
         </span>
       </span>
@@ -58,7 +58,7 @@ export function SaleDeviceSummary({ phone, className }: { phone: Phone; classNam
     <div className={cn("rounded-2xl border border-[#E5E5E7] bg-white p-4", className)}>
       <div className="flex items-start gap-3">
         <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-[#F5F5F7] text-[#6E0728]">
-          <Smartphone size={21} strokeWidth={1.4} />
+          <Smartphone size={21} strokeWidth={1.5} aria-hidden="true" />
         </span>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
