@@ -67,7 +67,7 @@ export default function HomePage() {
             </div>
           </Link>
 
-          <button type="button" onClick={() => setMessage("Trade-in processing is planned but not connected yet.")} className="group relative h-[210px] overflow-hidden rounded-md bg-[#E9EAEE] text-left transition active:scale-[0.98]">
+          <Link href="/trade-in" className="group relative h-[210px] overflow-hidden rounded-md bg-[#E9EAEE] text-left transition active:scale-[0.98]">
             <Image src="/trade-in-image.webp" alt="Trade in and exchange phones" fill sizes="(max-width: 512px) 50vw, 244px" className="object-cover" />
             <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 bg-gradient-to-t from-black/75 via-black/35 to-transparent px-4 pb-4 pt-16 text-white">
               <div>
@@ -76,9 +76,9 @@ export default function HomePage() {
               </div>
               <CardArrow />
             </div>
-          </button>
+          </Link>
 
-          <button type="button" onClick={() => setMessage("Employee inventory browsing is planned but not connected yet.")} className="group relative col-span-2 h-[210px] overflow-hidden rounded-md bg-[#E9EAEE] text-left transition active:scale-[0.98]">
+          <Link href="/inventory" className="group relative col-span-2 h-[210px] overflow-hidden rounded-md bg-[#E9EAEE] text-left transition active:scale-[0.98]">
             <Image src="/inventory.jpeg" alt="Phone inventory" fill sizes="(max-width: 512px) 100vw, 488px" className="object-cover" />
             <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 bg-gradient-to-t from-black/75 via-black/35 to-transparent px-4 pb-4 pt-16 text-white">
               <div>
@@ -87,7 +87,7 @@ export default function HomePage() {
               </div>
               <CardArrow />
             </div>
-          </button>
+          </Link>
         </section>
       </div>
     </main>
