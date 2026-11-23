@@ -119,7 +119,22 @@ jobs:
         run: npm run db:test:auth-concurrency
 
       - name: Run authenticated session and invitation email integration tests
-        run: npm run db:test:auth-sessions
+        shell: bash
+        run: |
+          set +e
+          npm run db:test:auth-sessions 2>&1 | tee /tmp/auth-session-test.log
+          status=${PIPESTATUS[0]}
+          set -e
+
+          if [ "$status" -ne 0 ]; then
+            details=$(tail -n 100 /tmp/auth-session-test.log)
+            details=${details//'%'/'%25'}
+            details=${details//$'\r'/'%0D'}
+            details=${details//$'\n'/'%0A'}
+            echo "::error title=Authenticated session integration failure::$details"
+          fi
+
+          exit "$status"
 
       - name: Stop and remove local Supabase
         if: always()
