@@ -57,6 +57,7 @@ const protectedRoutes: Array<{
   { prefix: "/manager/settings", permissions: ["access_manager_workspace", "manage_store_settings"] },
   { prefix: "/manager/employees", permissions: ["access_manager_workspace", "manage_employee_access"] },
   { prefix: "/manager/inventory", permissions: ["access_manager_workspace", "manage_inventory"] },
+  { prefix: "/manager/opening-stock", permissions: ["access_manager_workspace", "manage_inventory"] },
   { prefix: "/manager/approvals", permissions: ["access_manager_workspace", "review_approvals"] },
   { prefix: "/manager/reports", permissions: ["access_manager_workspace", "view_reports"] },
   { prefix: "/manager/sales", permissions: ["access_manager_workspace"] },

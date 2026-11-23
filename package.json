@@ -20,6 +20,7 @@
     "db:test:inventory-concurrency": "node --env-file-if-exists=.env.local scripts/test-inventory-concurrency.mjs",
     "db:test:sales-concurrency": "node --env-file-if-exists=.env.local scripts/test-sales-concurrency.mjs",
     "db:test:payment-concurrency": "node --env-file-if-exists=.env.local scripts/test-payment-concurrency.mjs",
+    "db:test:opening-stock-concurrency": "node --env-file-if-exists=.env.local scripts/test-opening-stock-concurrency.mjs",
     "db:test:auth-concurrency": "node --env-file-if-exists=.env.local scripts/test-auth-concurrency.mjs",
     "db:test:auth-sessions": "node --env-file-if-exists=.env.local scripts/test-auth-sessions.mjs"
   },
