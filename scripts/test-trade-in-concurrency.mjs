@@ -39,7 +39,8 @@ function luhnImei(base) {
 }
 
 async function createMember(label, roleId) {
-  const email = `trade-race-${label}-${suffix}@local.test`
+  const emailLabel = label.toLowerCase().replace(/[^a-z0-9]+/g, "-")
+  const email = `trade-race-${emailLabel}-${suffix}@local.test`
   const password = `Local-only-${randomUUID()}-A9!`
   const { data, error } = await admin.auth.admin.createUser({
     email,
