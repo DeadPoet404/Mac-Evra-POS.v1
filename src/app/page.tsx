@@ -1,32 +1,25 @@
 import { redirect } from "next/navigation"
 
 import { LoginForm } from "@/app/login-form"
+import { authorizedPostSignInPath, loginErrorMessage } from "@/lib/auth/policy"
 import { getCurrentAccess } from "@/lib/auth/server"
-import { membershipWithPermissions, safeInternalPath } from "@/lib/auth/policy"
-
-const errorMessages: Record<string, string> = {
-  inactive: "Your profile, store, or membership is inactive. Contact an administrator.",
-  "access-denied": "Your account does not have employee workspace access.",
-  unavailable: "Access could not be checked. Try signing in again shortly.",
-  "invalid-invitation": "This invitation link is invalid or has expired. Request a new invitation.",
-}
 
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams: Promise<{ next?: string; error?: string }>
+  searchParams: Promise<{ next?: string | string[]; error?: string | string[] }>
 }) {
   const params = await searchParams
-  const nextPath = safeInternalPath(params.next)
+  const requestedPath = typeof params.next === "string" ? params.next : null
 
-  let hasEmployeeAccess = false
+  let destination: string | null = null
   try {
     const access = await getCurrentAccess()
-    hasEmployeeAccess = Boolean(membershipWithPermissions(access, ["access_employee_workspace"]))
+    destination = authorizedPostSignInPath(access, requestedPath)
   } catch {
     // The form remains available with a non-sensitive availability message.
   }
-  if (hasEmployeeAccess) redirect(nextPath)
+  if (destination) redirect(destination)
 
   return (
     <main className="relative min-h-screen min-h-[100svh] w-full overflow-hidden bg-neutral-950 text-white">
@@ -60,8 +53,8 @@ export default async function LoginPage({
           </p>
 
           <LoginForm
-            nextPath={nextPath}
-            initialMessage={params.error ? errorMessages[params.error] : undefined}
+            nextPath={requestedPath ?? "/home"}
+            initialMessage={loginErrorMessage(params.error)}
           />
 
           <p className="mt-6 text-center text-[10px] tracking-wide text-white/60">

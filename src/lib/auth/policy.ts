@@ -48,6 +48,7 @@ export type AccessDecision =
   | { kind: "redirect"; location: string; reason: "sign-in" | "inactive" | "forbidden" | "already-signed-in" }
 
 const publicPrefixes = ["/auth/"]
+const applicationOrigin = "https://mac-evra.invalid"
 
 const protectedRoutes: Array<{
   prefix: string
@@ -65,6 +66,13 @@ const protectedRoutes: Array<{
   { prefix: "/inventory", permissions: ["access_employee_workspace"] },
   { prefix: "/home", permissions: ["access_employee_workspace"] },
 ]
+
+const loginErrorMessages = new Map<string, string>([
+  ["inactive", "Your profile, store, or membership is inactive. Contact an administrator."],
+  ["access-denied", "Your account does not have access to an application workspace."],
+  ["unavailable", "Access could not be checked. Try signing in again shortly."],
+  ["invalid-invitation", "This invitation link is invalid or has expired. Request a new invitation."],
+])
 
 function pathMatches(pathname: string, prefix: string) {
   return pathname === prefix || pathname.startsWith(`${prefix}/`)
@@ -97,11 +105,18 @@ export function membershipWithPermissions(
   )
 }
 
+export function defaultWorkspacePath(access: AccessSnapshot): "/home" | "/manager" | null {
+  if (membershipWithPermissions(access, ["access_employee_workspace"])) return "/home"
+  if (membershipWithPermissions(access, ["access_manager_workspace"])) return "/manager"
+  return null
+}
+
 export function evaluateRouteAccess(pathname: string, access: AccessSnapshot): AccessDecision {
   const requirement = routeRequirement(pathname)
+  const defaultWorkspace = defaultWorkspacePath(access)
 
-  if (pathname === "/" && membershipWithPermissions(access, ["access_employee_workspace"])) {
-    return { kind: "redirect", location: "/home", reason: "already-signed-in" }
+  if (pathname === "/" && defaultWorkspace) {
+    return { kind: "redirect", location: defaultWorkspace, reason: "already-signed-in" }
   }
 
   if (!requirement.protected) return { kind: "allow" }
@@ -119,7 +134,10 @@ export function evaluateRouteAccess(pathname: string, access: AccessSnapshot): A
   }
 
   if (!membershipWithPermissions(access, requirement.permissions)) {
-    return { kind: "redirect", location: "/home?notice=access-denied", reason: "forbidden" }
+    const fallback = defaultWorkspace && defaultWorkspace !== pathname
+      ? `${defaultWorkspace}?notice=access-denied`
+      : "/?error=access-denied"
+    return { kind: "redirect", location: fallback, reason: "forbidden" }
   }
 
   return { kind: "allow" }
@@ -130,12 +148,47 @@ export function safeInternalPath(value: FormDataEntryValue | string | null | und
   if (!value.startsWith("/") || value.startsWith("//") || value.includes("\\")) return fallback
 
   try {
-    const parsed = new URL(value, "https://mac-evra.invalid")
-    if (parsed.origin !== "https://mac-evra.invalid") return fallback
+    const parsed = new URL(value, applicationOrigin)
+    if (parsed.origin !== applicationOrigin) return fallback
+
+    // URL parsing normalizes dot segments before returning pathname. Validate
+    // the normalized value as well as encoded separators so inputs such as
+    // `/.//evil.example` cannot become a protocol-relative redirect target.
+    if (
+      !parsed.pathname.startsWith("/") ||
+      parsed.pathname.startsWith("//") ||
+      parsed.pathname.includes("\\") ||
+      /%(?:2f|5c)/i.test(parsed.pathname)
+    ) {
+      return fallback
+    }
+
     return `${parsed.pathname}${parsed.search}${parsed.hash}`
   } catch {
     return fallback
   }
+}
+
+export function authorizedPostSignInPath(
+  access: AccessSnapshot,
+  requested: FormDataEntryValue | string | null | undefined
+) {
+  const fallback = defaultWorkspacePath(access)
+  if (!fallback) return null
+
+  const candidate = safeInternalPath(requested, fallback)
+  const pathname = new URL(candidate, applicationOrigin).pathname
+  const requirement = routeRequirement(pathname)
+
+  if (!requirement.protected || !membershipWithPermissions(access, requirement.permissions)) {
+    return fallback
+  }
+
+  return candidate
+}
+
+export function loginErrorMessage(value: unknown) {
+  return typeof value === "string" ? loginErrorMessages.get(value) : undefined
 }
 
 export function publicAuthErrorMessage(error: unknown) {

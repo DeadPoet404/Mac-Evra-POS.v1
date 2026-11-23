@@ -14,12 +14,18 @@ export async function inviteStaffAction(
   formData: FormData
 ): Promise<StaffInvitationActionState> {
   try {
-    await inviteStaffMember({
+    const result = await inviteStaffMember({
       storeId: String(formData.get("storeId") ?? ""),
       roleId: String(formData.get("roleId") ?? ""),
       email: String(formData.get("email") ?? ""),
     })
-    return { status: "success", message: "The staff invitation was prepared for secure email delivery." }
+    return {
+      status: "success",
+      message:
+        result.delivery === "existing_account"
+          ? "A secure store-access link was sent to the employee's existing account."
+          : "A secure invitation email was sent to the new employee account.",
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : "The staff invitation could not be created."
     return { status: "error", message }

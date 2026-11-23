@@ -1,5 +1,6 @@
 import "server-only"
 
+import { invitationConfirmationUrl, isExistingAuthUserError } from "@/lib/auth/invitation"
 import { membershipWithPermissions } from "@/lib/auth/policy"
 import {
   invitationEmailDeliveryEnabled,
@@ -7,31 +8,50 @@ import {
   type StaffInvitationInput,
 } from "@/lib/auth/provisioning-policy"
 import { getCurrentAccess } from "@/lib/auth/server"
-import { createAdminClient } from "@/lib/supabase/admin"
+import { createAdminClient, createAuthDeliveryClient } from "@/lib/supabase/admin"
 import { createClient } from "@/lib/supabase/server"
 
 export type StaffInvitationResult = {
   invitationId: string
   email: string
-  delivery: "requested"
+  delivery: "new_account" | "existing_account"
 }
 
-function invitationRedirectUrl() {
+type PreparedInvitation = {
+  invitation_id: string
+  acceptance_token: string
+  attempt_id: string
+}
+
+function configuredInvitationUrl(invitationId: string, acceptanceToken: string) {
   const configured = process.env.APP_URL
   if (!configured) throw new Error("Staff invitation delivery is not configured.")
+  return invitationConfirmationUrl(configured, invitationId, acceptanceToken)
+}
 
-  const url = new URL(configured)
-  if (!(["http:", "https:"] as string[]).includes(url.protocol) || url.username || url.password) {
-    throw new Error("Staff invitation delivery is not configured.")
+async function recordDelivery(
+  supabase: Awaited<ReturnType<typeof createClient>>,
+  prepared: PreparedInvitation,
+  channel: "auth_invite" | "existing_account_magic_link",
+  outcome: "sent" | "failed"
+) {
+  const { error } = await supabase.rpc("record_staff_invitation_delivery", {
+    p_invitation_id: prepared.invitation_id,
+    p_attempt_id: prepared.attempt_id,
+    p_channel: channel,
+    p_outcome: outcome,
+  })
+
+  if (error) {
+    throw new Error("The invitation delivery result could not be audited. Contact an administrator.")
   }
-
-  return new URL("/auth/confirm", url).toString()
 }
 
 /**
  * Prepares trusted invitation metadata through a permission-checked RPC, then
- * uses Supabase Auth Admin from server-only code to request delivery. The role
- * and store are revalidated by the database; the browser cannot self-assign.
+ * requests either a Supabase invitation email for a new account or a no-signup
+ * magic link for an existing account. Store and role authority remain solely
+ * in the database invitation row; no editable Auth metadata is trusted.
  */
 export async function inviteStaffMember(input: StaffInvitationInput): Promise<StaffInvitationResult> {
   const normalized = normalizeStaffInvitationInput(input)
@@ -53,22 +73,61 @@ export async function inviteStaffMember(input: StaffInvitationInput): Promise<St
     p_expires_in_hours: normalized.expiresInHours,
   })
 
-  if (error || !Array.isArray(data) || data.length !== 1 || typeof data[0]?.invitation_id !== "string") {
+  const prepared = Array.isArray(data) ? (data[0] as Partial<PreparedInvitation> | undefined) : undefined
+  if (
+    error ||
+    !prepared ||
+    typeof prepared.invitation_id !== "string" ||
+    typeof prepared.acceptance_token !== "string" ||
+    typeof prepared.attempt_id !== "string"
+  ) {
     throw new Error("The staff invitation could not be prepared.")
   }
 
-  const invitationId = data[0].invitation_id as string
+  const invitation = prepared as PreparedInvitation
+  const redirectTo = configuredInvitationUrl(invitation.invitation_id, invitation.acceptance_token)
   const admin = createAdminClient()
   const { error: inviteError } = await admin.auth.admin.inviteUserByEmail(normalized.email, {
-    redirectTo: invitationRedirectUrl(),
-    data: { staff_invitation_id: invitationId },
+    redirectTo,
   })
 
-  if (inviteError) {
-    // Keep the prepared record pending so a manager can retry after correcting
-    // SMTP. Never return provider details or an action link to the browser.
+  if (!inviteError) {
+    await recordDelivery(supabase, invitation, "auth_invite", "sent")
+    return {
+      invitationId: invitation.invitation_id,
+      email: normalized.email,
+      delivery: "new_account",
+    }
+  }
+
+  if (!isExistingAuthUserError(inviteError)) {
+    await recordDelivery(supabase, invitation, "auth_invite", "failed")
     throw new Error("The invitation was prepared, but secure email delivery failed. Contact an administrator.")
   }
 
-  return { invitationId, email: normalized.email, delivery: "requested" }
+  // Existing accounts cannot receive another Auth Admin invitation. Request a
+  // normal magic link without allowing account creation; it carries the same
+  // invitation-specific application token in its server-approved redirect.
+  const deliveryClient = createAuthDeliveryClient()
+  const { error: existingAccountError } = await deliveryClient.auth.signInWithOtp({
+    email: normalized.email,
+    options: {
+      shouldCreateUser: false,
+      emailRedirectTo: redirectTo,
+    },
+  })
+
+  if (existingAccountError) {
+    await recordDelivery(supabase, invitation, "existing_account_magic_link", "failed")
+    throw new Error(
+      "The invitation was prepared for an existing account, but its secure access email could not be sent. Contact an administrator."
+    )
+  }
+
+  await recordDelivery(supabase, invitation, "existing_account_magic_link", "sent")
+  return {
+    invitationId: invitation.invitation_id,
+    email: normalized.email,
+    delivery: "existing_account",
+  }
 }

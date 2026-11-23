@@ -115,7 +115,10 @@ jobs:
       - name: Run authenticated inventory concurrency tests
         run: npm run db:test:inventory-concurrency
 
-      - name: Run authenticated session integration tests
+      - name: Run invitation suspension concurrency tests
+        run: npm run db:test:auth-concurrency
+
+      - name: Run authenticated session and invitation email integration tests
         run: npm run db:test:auth-sessions
 
       - name: Stop and remove local Supabase

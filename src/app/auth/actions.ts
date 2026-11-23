@@ -2,7 +2,7 @@
 
 import { redirect } from "next/navigation"
 
-import { membershipWithPermissions, publicAuthErrorMessage, safeInternalPath } from "@/lib/auth/policy"
+import { authorizedPostSignInPath, publicAuthErrorMessage } from "@/lib/auth/policy"
 import { resolveAccess } from "@/lib/auth/resolve"
 import { createClient } from "@/lib/supabase/server"
 
@@ -15,15 +15,6 @@ export const initialAuthActionState: AuthActionState = { status: "idle", message
 
 function normalizedEmail(value: FormDataEntryValue | null) {
   return typeof value === "string" ? value.trim().toLowerCase() : ""
-}
-
-async function acceptPendingInvitations(supabase: Awaited<ReturnType<typeof createClient>>) {
-  const { error } = await supabase.rpc("accept_staff_invitations")
-
-  // PGRST202 means the separately reviewed Phase 3 database migration has not
-  // been applied yet. Existing provisioned memberships can still sign in.
-  if (error && error.code !== "PGRST202") return false
-  return !error
 }
 
 export async function signInAction(
@@ -44,8 +35,6 @@ export async function signInAction(
     return { status: "error", message: publicAuthErrorMessage(error) }
   }
 
-  await acceptPendingInvitations(supabase)
-
   let access
   try {
     access = await resolveAccess(supabase)
@@ -57,7 +46,10 @@ export async function signInAction(
     }
   }
 
-  if (!membershipWithPermissions(access, ["access_employee_workspace"])) {
+  // Password authentication never consumes an invitation. Only the
+  // invitation-specific, verified email callback can activate membership.
+  const destination = authorizedPostSignInPath(access, formData.get("next"))
+  if (!destination) {
     await supabase.auth.signOut({ scope: "local" })
     return {
       status: "error",
@@ -65,7 +57,7 @@ export async function signInAction(
     }
   }
 
-  redirect(safeInternalPath(formData.get("next")))
+  redirect(destination)
 }
 
 export async function signOutAction() {
@@ -99,16 +91,23 @@ export async function setPasswordAction(
     return { status: "error", message: "The password could not be saved. Request a new invitation and try again." }
   }
 
-  const invitationsAccepted = await acceptPendingInvitations(supabase)
-  const access = await resolveAccess(supabase)
-  if (!membershipWithPermissions(access, ["access_employee_workspace"])) {
+  let access
+  try {
+    access = await resolveAccess(supabase)
+  } catch {
     return {
       status: "error",
-      message: invitationsAccepted
-        ? "Your invitation does not provide an active employee assignment. Contact an administrator."
-        : "Your password was saved, but staff access could not be activated. Contact an administrator.",
+      message: "Your password was saved, but staff access could not be checked. Contact an administrator.",
     }
   }
 
-  redirect("/home")
+  const destination = authorizedPostSignInPath(access, null)
+  if (!destination) {
+    return {
+      status: "error",
+      message: "Your invitation does not provide an active store assignment. Contact an administrator.",
+    }
+  }
+
+  redirect(destination)
 }

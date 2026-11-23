@@ -4,6 +4,7 @@ import { cache } from "react"
 import { redirect } from "next/navigation"
 
 import {
+  defaultWorkspacePath,
   membershipWithPermissions,
   safeInternalPath,
   type AccessSnapshot,
@@ -34,8 +35,9 @@ export async function requirePermissions(
 
   const membership = membershipWithPermissions(access, permissions, options.storeId)
   if (!membership) {
-    if (options.nextPath === "/home") redirect("/?error=access-denied")
-    redirect("/home?notice=access-denied")
+    const fallback = defaultWorkspacePath(access)
+    if (!fallback || fallback === options.nextPath) redirect("/?error=access-denied")
+    redirect(`${fallback}?notice=access-denied`)
   }
 
   return { access, membership }
