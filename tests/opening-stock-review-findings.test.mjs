@@ -106,8 +106,11 @@ test("finding 2: declared totals reconcile from line totals without application 
   const openingStockPage = read("src/app/manager/opening-stock/page.tsx")
   const sourceFiles = [
     "src/app/manager/opening-stock/page.tsx",
+    "src/app/manager/opening-stock/workspace.tsx",
+    "src/app/manager/opening-stock/invoices-tab.tsx",
+    "src/app/manager/opening-stock/lines-tab.tsx",
+    "src/app/manager/opening-stock/devices-tab.tsx",
     "src/app/manager/opening-stock/actions.ts",
-    "src/app/manager/opening-stock/batch-receiving-form.tsx",
     "src/lib/opening-stock.ts",
     "src/lib/opening-stock-server.ts",
   ]
@@ -116,10 +119,12 @@ test("finding 2: declared totals reconcile from line totals without application 
     const source = read(file)
     assert.doesNotMatch(source, /146[,\s]?550|14655000|OSEI|15 lines|48 units/i, `${file} must not hardcode the reviewed invoice`)
   }
-  assert.match(openingStockPage, /Declared invoice total reconciliation/)
-  assert.match(openingStockPage, /Line total/)
-  assert.match(openingStockPage, /Confirm invoice totals/)
+  // The reconciliation copy lives with the tab that performs the confirmation.
   assert.match(openingStockPage, /summarizeOpeningStockInvoiceReconciliation/)
+  const linesTab = read("src/app/manager/opening-stock/lines-tab.tsx")
+  assert.match(linesTab, /Declared invoice total reconciliation/)
+  assert.match(linesTab, /Line total/)
+  assert.match(linesTab, /Confirm invoice totals/)
   assert.match(read("src/app/manager/opening-stock/actions.ts"), /confirm_supplier_invoice/)
 
   const lineSpecs = Array.from({ length: 15 }, (_, index) =>
@@ -155,9 +160,11 @@ test("finding 2: declared totals reconcile from line totals without application 
 })
 
 test("finding 3: supplier invoice number/reference is optional", () => {
-  const page = read("src/app/manager/opening-stock/page.tsx")
-  assert.match(page, /Invoice number \/ reference · optional/)
-  assert.doesNotMatch(page, /name="invoiceNumber" required/)
+  // The create form now lives inside the Supplier Invoices tab.
+  const invoicesTab = read("src/app/manager/opening-stock/invoices-tab.tsx")
+  assert.match(invoicesTab, /Invoice number \/ reference · optional/)
+  assert.doesNotMatch(invoicesTab, /name="invoiceNumber" required/)
+  assert.doesNotMatch(invoicesTab, /invoiceNumber"\s+required/)
 
   const missingField = parseSupplierInvoiceInput(form({
     supplierName: "Approved Supplier",
@@ -238,18 +245,36 @@ test("finding 4: batch receiving keeps one device's own details and inspection p
 })
 
 test("final review: receiving forms require explicit condition and battery health and DB enforces reconciliation", () => {
-  const individualPage = read("src/app/manager/opening-stock/page.tsx")
-  const batchForm = read("src/app/manager/opening-stock/batch-receiving-form.tsx")
   const migration = read("supabase/migrations/20261124000000_opening_stock_intake.sql")
 
+  // The individual form and the batch form were merged into one device-entry
+  // form; the guarantees they carried must still hold for every path that
+  // collects a condition and a battery reading.
+  const devicesTab = read("src/app/manager/opening-stock/devices-tab.tsx")
+  const deviceLogic = read("src/lib/opening-stock-workspace.ts")
+  const linesTab = read("src/app/manager/opening-stock/lines-tab.tsx")
+  const invoicesTab = read("src/app/manager/opening-stock/invoices-tab.tsx")
+
   for (const [label, source] of [
-    ["individual receiving form", individualPage],
-    ["batch receiving form", batchForm],
+    ["devices tab", devicesTab],
+    ["device logic", deviceLogic],
+    ["lines tab", linesTab],
+    ["invoices tab", invoicesTab],
   ]) {
     assert.doesNotMatch(source, /defaultValue="excellent"/, `${label} must not prepopulate excellent condition`)
     assert.doesNotMatch(source, /defaultValue=\{100\}/, `${label} must not prepopulate 100% battery health`)
-    assert.match(source, /<option value="" disabled>Select condition<\/option>/, `${label} must require explicit condition selection`)
   }
+  assert.match(
+    devicesTab,
+    /<option value="" disabled>\s*Select condition\s*<\/option>/,
+    "the device-entry form must require explicit condition selection"
+  )
+  // A fresh device row carries no condition, no battery reading and no attestation.
+  assert.match(
+    deviceLogic,
+    /condition: "",\s*batteryHealth: "",\s*inspectionNotes: "",\s*checks: \{\}/,
+    "a new device row must start with empty condition, battery and attestation"
+  )
 
   assert.match(
     migration,
