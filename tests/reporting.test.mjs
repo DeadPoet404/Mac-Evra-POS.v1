@@ -376,6 +376,24 @@ test("the database window is a superset of the reporting rule for both date colu
     payment: { amountPesewas: 10_000, currency: "GHS", method: "cash", status: "confirmed" },
   })
   assert.deepEqual(salesInDateWindow([completedInWindow], window).map((row) => row.id), ["h"])
+
+  // A sale created inside the window but completed after it is returned by the
+  // SQL superset (created_at clause) and then correctly excluded by the filter.
+  const completedLater = sale({
+    id: "j",
+    status: "completed",
+    totalPesewas: 20_000,
+    createdAt: "2026-11-24T10:00:00Z",
+    completedAt: "2026-11-26T09:00:00Z",
+    payment: { amountPesewas: 20_000, currency: "GHS", method: "cash", status: "confirmed" },
+  })
+  assert.deepEqual(salesInDateWindow([completedLater], window), [])
+  assert.equal(summarizeSales([completedLater]).confirmedRevenuePesewas, 20_000, "it still counts in the period it completes")
+
+  // A draft created inside the window is kept so the period can report open work.
+  const draftInWindow = sale({ id: "k", status: "draft", totalPesewas: 90_000, createdAt: "2026-11-20T09:00:00Z" })
+  assert.deepEqual(salesInDateWindow([draftInWindow], window).map((row) => row.id), ["k"])
+  assert.equal(summarizeSales([draftInWindow]).draftSales, 1)
 })
 
 test("window helpers reject malformed or inverted windows", () => {
