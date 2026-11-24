@@ -25,14 +25,20 @@ test("iPhone device model catalogue migration seeds 35 models and 109 unique var
   assert.ok(uniquePairs.has("iphone 17 pro max::2048"), "iPhone 17 Pro Max must include 2TB (2048GB)")
 })
 
-test("opening-stock invoice line form uses searchable ModelSelector and resolves deviceModelId", () => {
-  const page = read("src/app/manager/opening-stock/page.tsx")
-  const selector = read("src/app/manager/opening-stock/model-selector.tsx")
+test("opening-stock invoice line form uses the searchable catalogue combobox and resolves deviceModelId", () => {
+  const linesTab = read("src/app/manager/opening-stock/lines-tab.tsx")
+  const selector = read("src/app/manager/opening-stock/model-combobox.tsx")
   const actions = read("src/app/manager/opening-stock/actions.ts")
   const server = read("src/lib/opening-stock-server.ts")
 
-  assert.match(page, /<ModelSelector deviceModels=\{dashboard\.deviceModels\} inputClass=\{inputClass\} \/>/)
+  // The line form hands the whole catalogue list to a searchable combobox;
+  // model and storage are chosen together so they can never disagree.
+  assert.match(linesTab, /<ModelCombobox[\s\S]*?deviceModels=\{deviceModels\}/)
   assert.match(selector, /Search model or storage/)
+  assert.match(selector, /role="listbox"/)
+  assert.match(selector, /export function formatStorage/)
+  // An unregistered catalogue entry is registered through the existing RPC
+  // rather than by inventing a new write path.
   assert.match(actions, /register_opening_stock_model/)
   assert.match(server, /from\("device_models"\)/)
 })
