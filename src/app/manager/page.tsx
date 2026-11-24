@@ -23,12 +23,20 @@ import { listAuthorizedInventory } from "@/lib/inventory-server"
 import {
   confirmedRevenuePesewas,
   periodRange,
-  salesInRange,
+  salesInDateWindow,
   seriesForRange,
+  storeDateKey,
   summarizeSales,
 } from "@/lib/reporting"
 import { formatPesewas, matchesSaleSearch, saleStatusLabel, type SaleStatus } from "@/lib/sales"
-import { listManagerSales, type PersistentSale } from "@/lib/sales-server"
+import {
+  countOpenManagerSales,
+  getLatestCompletedManagerSale,
+  listManagerSalesForWindow,
+  listOpenManagerSales,
+  listRecentManagerSales,
+  type PersistentSale,
+} from "@/lib/sales-server"
 
 function dateTime(value: string) {
   return new Intl.DateTimeFormat("en-GH", {
@@ -67,26 +75,36 @@ export default async function ManagerDashboard({
   const { membership } = await requirePermissions(["access_manager_workspace"], { nextPath: "/manager" })
   const params = await searchParams
 
-  const [sales, inventory] = await Promise.all([
-    listManagerSales(membership.storeId),
+  const weekRange = periodRange("weekly")
+  const monthRange = periodRange("monthly")
+
+  // One complete, paginated scan covers both the seven-day pulse and the
+  // month-to-date footer: the month starts at or before the week, so the union
+  // of the two windows is bounded by the earlier start and today.
+  const reportingWindow = {
+    fromKey: monthRange.fromKey < weekRange.fromKey ? monthRange.fromKey : weekRange.fromKey,
+    toKey: storeDateKey(new Date()),
+  }
+
+  const [windowSales, recentRecords, openWork, openCount, latestCompleted, inventory] = await Promise.all([
+    listManagerSalesForWindow(membership.storeId, reportingWindow),
+    listRecentManagerSales(membership.storeId, 5),
+    listOpenManagerSales(membership.storeId, 4),
+    countOpenManagerSales(membership.storeId),
+    getLatestCompletedManagerSale(membership.storeId),
     listAuthorizedInventory(membership.storeId),
   ])
 
-  const weekRange = periodRange("weekly")
-  const weekSales = salesInRange(sales, weekRange)
+  const weekSales = salesInDateWindow(windowSales, weekRange)
   const weekSummary = summarizeSales(weekSales)
-  const monthSummary = summarizeSales(salesInRange(sales, periodRange("monthly")))
+  const monthSummary = summarizeSales(salesInDateWindow(windowSales, monthRange))
   const series = seriesForRange(weekSales, weekRange)
   const peak = Math.max(...series.map((point) => point.revenuePesewas), 0)
   const inventorySummary = summarizeInventoryStatuses(inventory.map((device) => device.status))
 
-  const openWork = sales
-    .filter((sale) => sale.status === "draft" || sale.status === "awaiting_payment")
-    .slice(0, 4)
-
   const query = params.q?.trim() ?? ""
   const matchingSales = query
-    ? sales.filter((sale) =>
+    ? windowSales.filter((sale) =>
         matchesSaleSearch(
           {
             saleNumber: sale.saleNumber,
@@ -99,10 +117,8 @@ export default async function ManagerDashboard({
         )
       )
     : []
-  const recentSales = query ? matchingSales.slice(0, 5) : sales.slice(0, 5)
-
-  const latestCompleted = sales.find((sale) => sale.status === "completed") ?? null
-  const latestAwaiting = sales.find((sale) => sale.status === "awaiting_payment") ?? null
+  const recentSales = query ? matchingSales.slice(0, 5) : recentRecords
+  const latestAwaiting = openWork.find((sale) => sale.status === "awaiting_payment") ?? null
   const latestDevice = inventory[0] ?? null
 
   return (
@@ -215,7 +231,7 @@ export default async function ManagerDashboard({
               <CardTitle className="text-base">Needs attention</CardTitle>
               <CardDescription className="mt-1">Open drafts and sales awaiting payment</CardDescription>
             </div>
-            <DataBadge tone="amber">{openWork.length} open</DataBadge>
+            <DataBadge tone="amber">{openCount} open</DataBadge>
           </CardHeader>
           <CardContent className="space-y-3">
             {openWork.length ? (
@@ -257,7 +273,9 @@ export default async function ManagerDashboard({
               <div>
                 <CardTitle className="text-base">Recent sales</CardTitle>
                 <CardDescription className="mt-1">
-                  {query ? `${matchingSales.length} record${matchingSales.length === 1 ? "" : "s"} matching “${query}”` : "Latest persisted sale records for this store"}
+                  {query
+                    ? `${matchingSales.length} match${matchingSales.length === 1 ? "" : "es"} for “${query}” · ${reportingWindow.fromKey} to ${reportingWindow.toKey}`
+                    : "Latest persisted sale records for this store"}
                 </CardDescription>
               </div>
               <Button render={<Link href="/manager/sales" />} variant="ghost" size="sm">

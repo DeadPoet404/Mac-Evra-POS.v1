@@ -19,7 +19,7 @@ import {
   type ReportPeriod,
 } from "@/lib/reporting"
 import { formatPesewas } from "@/lib/sales"
-import { listManagerSales } from "@/lib/sales-server"
+import { listManagerSalesForWindow } from "@/lib/sales-server"
 
 const periodLabels: Record<ReportPeriod, string> = {
   daily: "Today",
@@ -38,9 +38,13 @@ export default async function ReportsPage({
   const params = await searchParams
   const period: ReportPeriod = isReportPeriod(params.period) ? params.period : "monthly"
 
-  const sales = await listManagerSales(membership.storeId)
   const range = periodRange(period)
-  const periodSales = salesInRange(sales, range)
+  // Complete, paginated scan for exactly this period — the same helper the CSV
+  // route uses, so the page and the export can never disagree.
+  const periodSales = salesInRange(
+    await listManagerSalesForWindow(membership.storeId, range),
+    range
+  )
   const summary = summarizeSales(periodSales)
   const series = seriesForRange(periodSales, range)
   const peak = Math.max(...series.map((point) => point.revenuePesewas), 0)

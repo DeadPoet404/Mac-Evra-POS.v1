@@ -12,7 +12,7 @@ import {
   summarizeSales,
   type ReportPeriod,
 } from "@/lib/reporting"
-import { listManagerSales } from "@/lib/sales-server"
+import { listManagerSalesForWindow } from "@/lib/sales-server"
 
 /**
  * CSV export for the manager reports page.
@@ -29,9 +29,11 @@ export async function GET(request: Request) {
   const requested = new URL(request.url).searchParams.get("period")
   const period: ReportPeriod = isReportPeriod(requested) ? requested : "monthly"
 
-  const sales = await listManagerSales(membership.storeId)
   const range = periodRange(period)
-  const periodSales = salesInRange(sales, range)
+  const periodSales = salesInRange(
+    await listManagerSalesForWindow(membership.storeId, range),
+    range
+  )
   const summary = summarizeSales(periodSales)
 
   const csv = buildReportCsv({

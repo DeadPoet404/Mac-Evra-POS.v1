@@ -91,7 +91,7 @@ test("no fabricated people, sale numbers or preview figures survive in the appli
 
 test("the manager dashboard reads sales and inventory from the database instead of constants", () => {
   const source = read("src/app/manager/page.tsx")
-  assert.match(source, /listManagerSales\(membership\.storeId\)/, "dashboard sales must come from the store register")
+  assert.match(source, /listManagerSalesForWindow\(membership\.storeId, reportingWindow\)/, "dashboard totals must come from the paginated window scan")
   assert.match(source, /listAuthorizedInventory\(membership\.storeId\)/, "inventory metrics must come from live rows")
   assert.match(source, /summarizeSales\(/, "totals must come from the shared financial summary")
   assert.match(source, /seriesForRange\(/, "the chart must be derived from persisted sales")
@@ -103,7 +103,7 @@ test("the manager dashboard reads sales and inventory from the database instead 
 
 test("the reports page and CSV export use real records and disclose the profit gap", () => {
   const page = read("src/app/manager/reports/page.tsx")
-  assert.match(page, /listManagerSales\(membership\.storeId\)/)
+  assert.match(page, /listManagerSalesForWindow\(membership\.storeId, range\)/)
   assert.match(page, /breakdownByEmployee\(periodSales\)/)
   assert.match(page, /breakdownByModel\(periodSales\)/)
   assert.match(page, /breakdownByPaymentMethod\(periodSales\)/)
@@ -113,7 +113,7 @@ test("the reports page and CSV export use real records and disclose the profit g
   assert.ok(!/URL\.createObjectURL/.test(page), "the browser must not build a report from client state")
 
   const route = read("src/app/manager/reports/export/route.ts")
-  assert.match(route, /listManagerSales\(membership\.storeId\)/)
+  assert.match(route, /listManagerSalesForWindow\(membership\.storeId, range\)/)
   assert.match(route, /buildReportCsv\(/)
   assert.match(route, /text\/csv/)
 })
@@ -191,4 +191,51 @@ test("the employee inventory and sale pages keep using authorised server reads",
   const sale = read("src/app/new-sale/page.tsx")
   assert.match(sale, /getPersistentSale/)
   assert.match(sale, /requirePermissions\(\["create_sales"\]/)
+})
+
+test("reporting reads every sale in the window instead of a capped page", () => {
+  const server = read("src/lib/sales-server.ts")
+
+  assert.ok(!/limit\(\s*500\s*\)/.test(server), "the 500-row cap must not return")
+  assert.ok(!/export async function listManagerSales\b/.test(server), "the capped helper must stay removed")
+  assert.match(server, /export async function listManagerSalesForWindow/)
+  assert.match(server, /collectAllPages/)
+  assert.match(server, /saleWindowOrFilter\(window\)/)
+  assert.match(server, /\.range\(offset, offset \+ limit - 1\)/, "pages must be requested by range")
+  assert.match(server, /\.order\("created_at", \{ ascending: false \}\)\s*\n?\s*\.order\("id", \{ ascending: false \}\)/,
+    "a unique tiebreaker keeps pagination stable")
+  assert.match(server, /const hydrationChunkSize = 100/, "nested detail queries stay chunked")
+  assert.match(server, /export async function listRecentManagerSales/, "recent sales use a bounded query")
+  assert.match(server, /export async function listOpenManagerSales/, "open work uses a bounded query")
+  assert.match(server, /export async function countOpenManagerSales/, "open-work count comes from the database")
+  assert.match(server, /export async function getLatestCompletedManagerSale/)
+
+  for (const file of [
+    "src/app/manager/page.tsx",
+    "src/app/manager/reports/page.tsx",
+    "src/app/manager/reports/export/route.ts",
+    "src/app/manager/sales/page.tsx",
+  ]) {
+    const source = read(file)
+    assert.ok(!/listManagerSales\(/.test(source), `${file} must not use the removed capped helper`)
+    assert.match(source, /listManagerSalesForWindow\(membership\.storeId/, `${file} must scan the complete window`)
+  }
+
+  const dashboard = read("src/app/manager/page.tsx")
+  assert.match(dashboard, /listRecentManagerSales\(membership\.storeId, 5\)/, "recent sales stay a bounded query")
+  assert.match(dashboard, /listOpenManagerSales\(membership\.storeId, 4\)/, "open work stays a bounded query")
+  assert.match(dashboard, /countOpenManagerSales\(membership\.storeId\)/, "the open badge uses the exact count")
+})
+
+test("the CSV export shares the reporting window and neutralises formulas", () => {
+  const route = read("src/app/manager/reports/export/route.ts")
+  assert.match(route, /const range = periodRange\(period\)/)
+  assert.match(route, /listManagerSalesForWindow\(membership\.storeId, range\)/)
+  assert.match(route, /salesInRange\(/)
+
+  const reporting = read("src/lib/reporting.ts")
+  assert.match(reporting, /export function escapeCsvText/)
+  assert.match(reporting, /formulaPrefixes/)
+  assert.match(reporting, /export function saleWindowOrFilter/)
+  assert.match(reporting, /export function windowTimestamps/)
 })

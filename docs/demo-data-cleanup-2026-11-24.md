@@ -48,6 +48,35 @@ Deleted modules: `src/lib/manager-data.ts`, `src/lib/inventory.ts` (sample `inve
 - **Trade-in** — no trade-in records, valuation rules or approval path exist. The route is kept so
   employees are told the truth rather than shown an invented estimate.
 
+## Completeness of reporting reads
+
+`listManagerSales()` used to request a single page capped at `.limit(500)`, so revenue, transaction
+counts and breakdowns would silently undercount once a store passed 500 sales. It has been replaced
+by window-scoped, paginated reads:
+
+- `listManagerSalesForWindow(storeId, { fromKey, toKey })` (`src/lib/sales-server.ts`) asks for
+  `created_at` **or** `completed_at` inside the window — a superset of the reporting rule, since a
+  completed sale is filed under its completion date — and pages through `.range(offset, offset+limit-1)`
+  with `pageSize = 200` until the server returns a short page. There is no row cap.
+- Every page is ordered by `(created_at desc, id desc)`. The unique `id` tiebreaker gives the range a
+  deterministic total order, so a row can never be skipped or repeated at a page boundary, and rows
+  repeated by a concurrent insert are de-duplicated by id.
+- Nested detail reads (customers, sale items, payments, reservations) are requested in chunks of 100
+  sale ids, so no single `.in()` list grows with the store.
+- `collectAllPages` (`src/lib/sales-pagination.ts`) is the shared walker. It raises an error if a page
+  budget is exhausted rather than returning a partial set, so a truncated report is never shown as a
+  complete one.
+- `/manager`, `/manager/reports`, `/manager/reports/export` and `/manager/sales` all read through the
+  same helper, and the CSV route passes the same `periodRange()` window as the page.
+- Dashboard previews stay bounded: the recent-sales table (`limit 5`), the open-work list (`limit 4`)
+  and an exact `count` query for the open-work badge do not scan the register.
+- `/manager/sales` now shows one explicit window (the current month by default, or the chosen dates)
+  and says so on the page instead of silently showing the first 500 rows.
+
+CSV cells that a user can influence are neutralised against spreadsheet formula injection: text
+starting with `=`, `+`, `-`, `@`, tab or carriage return is prefixed with an apostrophe, while numeric
+cells stay numeric.
+
 ## Financial rules enforced in code and tests
 
 `src/lib/reporting.ts` is the single place that turns sale records into figures:

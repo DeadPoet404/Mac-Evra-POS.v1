@@ -1,7 +1,9 @@
 import "server-only"
 
-import { createClient } from "@/lib/supabase/server"
+import { saleWindowOrFilter } from "@/lib/reporting"
 import { matchesCustomerSearch, type PaymentMethod, type SaleStatus } from "@/lib/sales"
+import { collectAllPages } from "@/lib/sales-pagination"
+import { createClient } from "@/lib/supabase/server"
 
 export type SaleCustomer = {
   id: string
@@ -250,9 +252,12 @@ function mapSale(
   }
 }
 
-async function hydrateSales(rawSales: RawSale[]) {
-  if (rawSales.length === 0) return []
-  const supabase = await createClient()
+type SaleClient = Awaited<ReturnType<typeof createClient>>
+
+/** Nested rows are requested in bounded chunks so no `.in()` list grows with the store. */
+const hydrationChunkSize = 100
+
+async function hydrateSalesChunk(supabase: SaleClient, rawSales: RawSale[]) {
   const saleIds = rawSales.map((sale) => requiredString(sale.id, "ID"))
   const customerIds = [...new Set(rawSales.map((sale) => optionalString(sale.customer_id)).filter((id): id is string => Boolean(id)))]
 
@@ -314,6 +319,25 @@ async function hydrateSales(rawSales: RawSale[]) {
   return rawSales.map((sale) => mapSale(sale, customers, items, payments))
 }
 
+/**
+ * Hydrates any number of sale rows by chunking the nested detail queries.
+ * Chunking keeps each round trip bounded no matter how many sales a reporting
+ * period contains.
+ */
+async function hydrateSales(rawSales: RawSale[]) {
+  if (rawSales.length === 0) return []
+  const supabase = await createClient()
+  const hydrated: PersistentSale[] = []
+
+  for (let start = 0; start < rawSales.length; start += hydrationChunkSize) {
+    hydrated.push(
+      ...(await hydrateSalesChunk(supabase, rawSales.slice(start, start + hydrationChunkSize)))
+    )
+  }
+
+  return hydrated
+}
+
 export async function listEmployeeSales(storeId: string, userId: string) {
   const supabase = await createClient()
   const { data, error } = await supabase
@@ -341,16 +365,110 @@ export async function getPersistentSale(storeId: string, saleId: string) {
   return (await hydrateSales([data as unknown as RawSale]))[0] ?? null
 }
 
-export async function listManagerSales(storeId: string) {
+/** Store calendar window (`YYYY-MM-DD` keys resolved in Africa/Accra). */
+export type ManagerSaleWindow = {
+  fromKey: string
+  toKey: string
+}
+
+/** Rows requested per round trip; comfortably below the API row ceiling. */
+const managerSalePageSize = 200
+
+/**
+ * Every sale filed inside a store calendar window.
+ *
+ * The query covers both `created_at` and `completed_at` so it is a superset of
+ * the reporting filter (a completed sale is filed under its completion date),
+ * then pages through the range until the server returns a short page. The
+ * result is therefore complete for the window: there is no row cap to silently
+ * undercount revenue once a store passes any particular number of sales.
+ *
+ * Ordering is `(created_at, id)` so pages have a deterministic total order and
+ * a row can never be skipped or repeated across a page boundary.
+ */
+export async function listManagerSalesForWindow(
+  storeId: string,
+  window: ManagerSaleWindow
+): Promise<PersistentSale[]> {
+  const supabase = await createClient()
+  const filter = saleWindowOrFilter(window)
+
+  const { rows } = await collectAllPages<RawSale>(
+    async ({ offset, limit }) => {
+      const { data, error } = await supabase
+        .from("sales")
+        .select(saleSelection)
+        .eq("store_id", storeId)
+        .or(filter)
+        .order("created_at", { ascending: false })
+        .order("id", { ascending: false })
+        .range(offset, offset + limit - 1)
+
+      if (error) throw new Error("Store sales for the selected period could not be loaded.")
+      return (data ?? []) as unknown as RawSale[]
+    },
+    { pageSize: managerSalePageSize, key: (sale) => requiredString(sale.id, "ID") }
+  )
+
+  return hydrateSales(rows)
+}
+
+/** Latest persisted sales for previews. Bounded by `limit`. */
+export async function listRecentManagerSales(storeId: string, limit = 5): Promise<PersistentSale[]> {
   const supabase = await createClient()
   const { data, error } = await supabase
     .from("sales")
     .select(saleSelection)
     .eq("store_id", storeId)
     .order("created_at", { ascending: false })
-    .limit(500)
-  if (error) throw new Error("Store sales could not be loaded.")
+    .order("id", { ascending: false })
+    .limit(limit)
+  if (error) throw new Error("Recent store sales could not be loaded.")
   return hydrateSales((data ?? []) as unknown as RawSale[])
+}
+
+/** Open sale work (drafts and awaiting payment), most recently touched first. */
+export async function listOpenManagerSales(storeId: string, limit = 4): Promise<PersistentSale[]> {
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from("sales")
+    .select(saleSelection)
+    .eq("store_id", storeId)
+    .in("status", ["draft", "awaiting_payment"])
+    .order("updated_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(limit)
+  if (error) throw new Error("Open sale work could not be loaded.")
+  return hydrateSales((data ?? []) as unknown as RawSale[])
+}
+
+/** Exact number of open sale records, counted by the database without loading rows. */
+export async function countOpenManagerSales(storeId: string): Promise<number> {
+  const supabase = await createClient()
+  const { count, error } = await supabase
+    .from("sales")
+    .select("id", { count: "exact", head: true })
+    .eq("store_id", storeId)
+    .in("status", ["draft", "awaiting_payment"])
+  if (error) throw new Error("Open sale work could not be counted.")
+  return count ?? 0
+}
+
+/** Most recently completed sale, for the dashboard summary card. */
+export async function getLatestCompletedManagerSale(storeId: string): Promise<PersistentSale | null> {
+  const supabase = await createClient()
+  const { data, error } = await supabase
+    .from("sales")
+    .select(saleSelection)
+    .eq("store_id", storeId)
+    .eq("status", "completed")
+    .order("completed_at", { ascending: false })
+    .order("id", { ascending: false })
+    .limit(1)
+  if (error) throw new Error("The latest completed sale could not be loaded.")
+  const rows = (data ?? []) as unknown as RawSale[]
+  if (rows.length === 0) return null
+  return (await hydrateSales(rows))[0] ?? null
 }
 
 export async function listStoreCustomers(storeId: string, query = "") {

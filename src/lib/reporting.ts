@@ -194,11 +194,56 @@ export function saleReportDateKey(sale: ReportSale): string {
   return storeDateKey(sale.completedAt ?? sale.createdAt)
 }
 
-export function salesInRange<T extends ReportSale>(sales: readonly T[], range: PeriodRange): T[] {
+/** A store calendar window expressed as inclusive date keys. */
+export type DateWindow = {
+  fromKey: string
+  toKey: string
+}
+
+export function salesInDateWindow<T extends ReportSale>(sales: readonly T[], window: DateWindow): T[] {
   return sales.filter((sale) => {
     const key = saleReportDateKey(sale)
-    return key >= range.fromKey && key <= range.toKey
+    return key >= window.fromKey && key <= window.toKey
   })
+}
+
+export function salesInRange<T extends ReportSale>(sales: readonly T[], range: PeriodRange): T[] {
+  return salesInDateWindow(sales, range)
+}
+
+/**
+ * UTC bounds for a store calendar window.
+ *
+ * Africa/Accra is UTC+00:00 all year, so a store day starts at exactly 00:00Z
+ * and the upper bound is exclusive at the start of the following store day.
+ */
+export function windowTimestamps(window: DateWindow): { from: string; toExclusive: string } {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(window.fromKey) || !/^\d{4}-\d{2}-\d{2}$/.test(window.toKey)) {
+    throw new Error("A reporting window must use YYYY-MM-DD store date keys.")
+  }
+  if (window.toKey < window.fromKey) {
+    throw new Error("A reporting window cannot end before it starts.")
+  }
+  return {
+    from: `${window.fromKey}T00:00:00.000Z`,
+    toExclusive: `${addDaysToKey(window.toKey, 1)}T00:00:00.000Z`,
+  }
+}
+
+/**
+ * PostgREST `or` expression selecting every sale that belongs to a window.
+ *
+ * A sale is filed under its completion date once completed, otherwise under its
+ * creation date, so the query has to cover both columns to stay a superset of
+ * the reporting filter. Callers still apply `salesInDateWindow` afterwards, so
+ * the database bound only narrows the scan and never decides the totals.
+ */
+export function saleWindowOrFilter(window: DateWindow): string {
+  const { from, toExclusive } = windowTimestamps(window)
+  return [
+    `and(created_at.gte.${from},created_at.lt.${toExclusive})`,
+    `and(completed_at.gte.${from},completed_at.lt.${toExclusive})`,
+  ].join(",")
 }
 
 /** A completed sale only becomes revenue when its payment is confirmed in GHS. */
@@ -354,9 +399,28 @@ export type ReportCsvInput = {
   generatedAt: string
 }
 
+/**
+ * Spreadsheet formula injection guard.
+ *
+ * Text that a user can influence (store name, employee name, device label,
+ * transaction reference) must never start a cell that Excel or Sheets will
+ * evaluate. A leading apostrophe keeps the value visible while forcing text.
+ * Numbers produced by this module are left untouched so they stay numeric.
+ */
+const formulaPrefixes = ["=", "+", "-", "@", "\t", "\r"]
+
+export function escapeCsvText(value: string): string {
+  if (value === "") return value
+  return formulaPrefixes.some((prefix) => value.startsWith(prefix)) ? `'${value}` : value
+}
+
+export function escapeCsvCell(value: string): string {
+  return `"${escapeCsvText(value).replace(/"/g, '""')}"`
+}
+
 function csvCell(value: string | number | null | undefined) {
-  const text = value === null || value === undefined ? "" : String(value)
-  return `"${text.replace(/"/g, '""')}"`
+  if (typeof value === "number") return `"${value}"`
+  return escapeCsvCell(value ?? "")
 }
 
 function csvRow(cells: readonly (string | number | null | undefined)[]) {

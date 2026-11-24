@@ -15,10 +15,15 @@ import {
   saleReportDateKey,
   salesInRange,
   seriesForRange,
+  escapeCsvCell,
+  escapeCsvText,
+  saleWindowOrFilter,
+  salesInDateWindow,
   sharePercent,
   storeDateKey,
   storeTimeZone,
   summarizeSales,
+  windowTimestamps,
 } from "../src/lib/reporting.ts"
 
 /**
@@ -339,4 +344,84 @@ test("the reporting module exposes no cost or profit calculation", () => {
     !exported.some((name) => /profit|margin|cost/i.test(name)),
     "gross profit cannot be derived without acquisition cost, so no helper may claim to"
   )
+})
+
+test("the database window is a superset of the reporting rule for both date columns", () => {
+  const window = { fromKey: "2026-11-18", toKey: "2026-11-24" }
+  assert.deepEqual(windowTimestamps(window), {
+    from: "2026-11-18T00:00:00.000Z",
+    toExclusive: "2026-11-25T00:00:00.000Z",
+  })
+
+  const filter = saleWindowOrFilter(window)
+  assert.match(filter, /and\(created_at\.gte\.2026-11-18T00:00:00\.000Z,created_at\.lt\.2026-11-25T00:00:00\.000Z\)/)
+  assert.match(filter, /and\(completed_at\.gte\.2026-11-18T00:00:00\.000Z,completed_at\.lt\.2026-11-25T00:00:00\.000Z\)/)
+  assert.equal(filter.split("and(").length - 1, 2, "exactly the two date clauses are combined")
+  assert.ok(!/\d,\d/.test(filter), "timestamps never embed a comma that would break the PostgREST filter")
+
+  // A monthly window ends on the real month end and the exclusive bound rolls over.
+  const monthly = periodRange("monthly", new Date("2026-12-15T12:00:00Z"))
+  assert.deepEqual(windowTimestamps(monthly), {
+    from: "2026-12-01T00:00:00.000Z",
+    toExclusive: "2027-01-01T00:00:00.000Z",
+  })
+
+  // The JavaScript filter and the SQL superset agree on a sale completed inside the window.
+  const completedInWindow = sale({
+    id: "h",
+    status: "completed",
+    totalPesewas: 10_000,
+    createdAt: "2026-11-17T22:00:00Z",
+    completedAt: "2026-11-19T09:00:00Z",
+    payment: { amountPesewas: 10_000, currency: "GHS", method: "cash", status: "confirmed" },
+  })
+  assert.deepEqual(salesInDateWindow([completedInWindow], window).map((row) => row.id), ["h"])
+})
+
+test("window helpers reject malformed or inverted windows", () => {
+  assert.throws(() => windowTimestamps({ fromKey: "18-11-2026", toKey: "2026-11-24" }), /YYYY-MM-DD/)
+  assert.throws(() => windowTimestamps({ fromKey: "2026-11-24", toKey: "2026-11-18" }), /cannot end before/)
+})
+
+test("CSV cells neutralise spreadsheet formulas from user-controlled text", () => {
+  assert.equal(escapeCsvText("=1+1"), "'=1+1")
+  assert.equal(escapeCsvText("+233 24 000 0000"), "'+233 24 000 0000")
+  assert.equal(escapeCsvText("-cmd|' /C calc'!A0"), "'-cmd|' /C calc'!A0")
+  assert.equal(escapeCsvText("@SUM(A1:A2)"), "'@SUM(A1:A2)")
+  assert.equal(escapeCsvText("\t=cmd"), "'\t=cmd")
+  assert.equal(escapeCsvText("\r=cmd"), "'\r=cmd")
+  assert.equal(escapeCsvText("Mac Evra"), "Mac Evra", "ordinary text is untouched")
+  assert.equal(escapeCsvText("Ama Mensah"), "Ama Mensah")
+  assert.equal(escapeCsvCell('Nana "Kofi"'), '"Nana ""Kofi"""', "quotes are still doubled")
+
+  const week = periodRange("weekly", new Date("2026-11-24T12:00:00Z"))
+  const hostileSale = sale({
+    id: "i",
+    status: "completed",
+    totalPesewas: 500_000,
+    completedAt: "2026-11-24T10:00:00Z",
+    employeeName: "=HYPERLINK(\"http://evil\",\"click\")",
+    items: [deviceItem("-iPhone 13 · 128GB · Midnight", 500_000)],
+    payment: { amountPesewas: 500_000, currency: "GHS", method: "cash", status: "confirmed" },
+  })
+  const csv = buildReportCsv({
+    storeName: "@Mac Evra",
+    period: "weekly",
+    range: week,
+    summary: summarizeSales([hostileSale]),
+    employees: breakdownByEmployee([hostileSale]),
+    models: breakdownByModel([hostileSale]),
+    paymentMethods: breakdownByPaymentMethod([hostileSale]),
+    generatedAt: "2026-11-24T12:00:00Z",
+  })
+
+  assert.match(csv, /"Store","'@Mac Evra"/)
+  assert.match(csv, /"Employee","Completed paid sales"/)
+  assert.ok(
+    !/(^|,)("?)=/.test(csv),
+    "no exported cell may begin with a bare formula character"
+  )
+  assert.ok(csv.includes(`"'=HYPERLINK(""http://evil"",""click"")"`), "the employee cell is neutralised, not dropped")
+  assert.ok(csv.includes(`"'-iPhone 13 128GB"`), "the device label is neutralised")
+  assert.match(csv, /"Confirmed revenue \(GHS\)","5000\.00"/, "numeric cells stay numeric")
 })
