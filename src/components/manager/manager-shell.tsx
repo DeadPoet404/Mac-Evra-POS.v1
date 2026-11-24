@@ -6,11 +6,9 @@ import { usePathname } from "next/navigation"
 import { signOutAction } from "@/app/auth/actions"
 import {
   Apple,
-  Bell,
   ChartNoAxesCombined,
   ClipboardCheck,
   LayoutDashboard,
-  LifeBuoy,
   LogOut,
   PackagePlus,
   ReceiptText,
@@ -20,8 +18,6 @@ import {
 } from "lucide-react"
 
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -40,7 +36,6 @@ import {
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
-  SidebarMenuBadge,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarProvider,
@@ -53,7 +48,7 @@ const navigation = [
   { label: "Inventory", icon: Smartphone, href: "/manager/inventory" },
   { label: "Opening stock", icon: PackagePlus, href: "/manager/opening-stock" },
   { label: "Employees", icon: Users, href: "/manager/employees" },
-  { label: "Approvals", icon: ClipboardCheck, href: "/manager/approvals", count: 4 },
+  { label: "Approvals", icon: ClipboardCheck, href: "/manager/approvals" },
   { label: "Reports", icon: ChartNoAxesCombined, href: "/manager/reports" },
 ]
 
@@ -121,11 +116,6 @@ export function ManagerShell({
                       <item.icon size={18} aria-hidden="true" />
                       <span>{item.label}</span>
                     </SidebarMenuButton>
-                    {item.count ? (
-                      <SidebarMenuBadge className="bg-[#F5E8EC] text-[#6E0728] group-data-[collapsible=icon]:hidden">
-                        {item.count}
-                      </SidebarMenuBadge>
-                    ) : null}
                   </SidebarMenuItem>
                 ))}
               </SidebarMenu>
@@ -145,12 +135,6 @@ export function ManagerShell({
                   >
                     <Settings size={18} aria-hidden="true" />
                     <span>Settings</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Help & support" className="h-10 rounded-lg px-3">
-                    <LifeBuoy size={18} aria-hidden="true" />
-                    <span>Help & support</span>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
               </SidebarMenu>
@@ -196,13 +180,6 @@ export function ManagerShell({
               </div>
             </div>
             <div className="flex items-center gap-2">
-              <Badge variant="outline" className="hidden border-[#E0D1D6] bg-[#FBF7F8] text-[#6E0728] sm:inline-flex">
-                Preview data
-              </Badge>
-              <Button variant="outline" size="icon" aria-label="Notifications" className="relative bg-white">
-                <Bell size={17} />
-                <span className="absolute right-1.5 top-1.5 size-1.5 rounded-full bg-[#6E0728]" />
-              </Button>
               <Avatar className="hidden size-8 sm:flex">
                 <AvatarFallback className="bg-[#F1E8EC] text-xs font-semibold text-[#6E0728]">{initials}</AvatarFallback>
               </Avatar>

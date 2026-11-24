@@ -2,8 +2,7 @@
 
 import Image from "next/image";
 import Link from "next/link";
-import { useState } from "react";
-import { Apple, ArrowRight, LogOut, Search, ShoppingBag } from "lucide-react";
+import { Apple, ArrowRight, LogOut } from "lucide-react";
 
 import { signOutAction } from "@/app/auth/actions";
 
@@ -16,7 +15,6 @@ function CardArrow() {
 }
 
 export function HomeClient({ displayName }: { displayName: string }) {
-  const [message, setMessage] = useState("");
   const firstName = displayName.trim().split(/\s+/)[0] || "there";
 
   return (
@@ -28,12 +26,6 @@ export function HomeClient({ displayName }: { displayName: string }) {
           </Link>
 
           <div className="flex items-center gap-5">
-            <button type="button" aria-label="Search" onClick={() => setMessage("Employee search is not connected yet.")} className="flex h-8 w-8 items-center justify-center transition hover:opacity-75 active:scale-95">
-              <Search size={18} aria-hidden="true" />
-            </button>
-            <button type="button" aria-label="Open current sale" onClick={() => setMessage("There is no active sale in this preview.")} className="flex h-8 w-8 items-center justify-center transition hover:opacity-75 active:scale-95">
-              <ShoppingBag size={18} aria-hidden="true" />
-            </button>
             <form action={signOutAction}>
               <button type="submit" aria-label="Sign out" className="flex h-8 w-8 items-center justify-center transition hover:opacity-75 active:scale-95">
                 <LogOut size={18} aria-hidden="true" />
@@ -54,12 +46,6 @@ export function HomeClient({ displayName }: { displayName: string }) {
           </p>
         </section>
 
-        {message ? (
-          <p role="status" className="mt-5 rounded-xl bg-[#F7F7F8] px-4 py-3 text-sm text-[#68686D]">
-            {message}
-          </p>
-        ) : null}
-
         <section className="mt-8 grid grid-cols-2 gap-2" aria-label="Employee actions">
           <Link href="/new-sale" className="group relative h-[210px] overflow-hidden rounded-md bg-[#F5F5F7] text-left transition active:scale-[0.98]">
             <Image src="/Mac-evra-sale-badge.jpeg" alt="New Sale" fill sizes="(max-width: 512px) 50vw, 244px" className="object-cover transition duration-300 group-active:scale-105" />
@@ -77,7 +63,7 @@ export function HomeClient({ displayName }: { displayName: string }) {
             <div className="absolute inset-x-0 bottom-0 flex items-end justify-between gap-2 bg-gradient-to-t from-black/75 via-black/35 to-transparent px-4 pb-4 pt-16 text-white">
               <div>
                 <h2 className="text-[18px] font-semibold tracking-[-0.5px]">Process a Swap</h2>
-                <p className="mt-1 text-[12px] leading-snug text-white/85">Trade in and exchange devices.</p>
+                <p className="mt-1 text-[12px] leading-snug text-white/85">Not available yet — see what is needed.</p>
               </div>
               <CardArrow />
             </div>

@@ -4,8 +4,9 @@ import { CalendarDays, CircleAlert, Clock3, ReceiptText, Search, ShoppingBag, Us
 import { DataBadge, EmptyState, MetricCard, PageHeader } from "@/components/manager/manager-ui"
 import { Card, CardContent } from "@/components/ui/card"
 import { requirePermissions } from "@/lib/auth/server"
+import { periodRange, salesInDateWindow, storeDateKey } from "@/lib/reporting"
 import { formatPesewas, matchesSaleSearch, saleStatusLabel, saleStatuses, type SaleStatus } from "@/lib/sales"
-import { listManagerSales } from "@/lib/sales-server"
+import { listManagerSalesForWindow } from "@/lib/sales-server"
 
 function dateTime(value: string) {
   return new Intl.DateTimeFormat("en-GH", { dateStyle: "medium", timeStyle: "short", timeZone: "Africa/Accra" }).format(new Date(value))
@@ -27,17 +28,27 @@ export default async function SalesPage({
 }) {
   const { membership } = await requirePermissions(["access_manager_workspace"], { nextPath: "/manager/sales" })
   const params = await searchParams
-  const sales = await listManagerSales(membership.storeId)
   const query = params.q?.trim() ?? ""
   const status = saleStatuses.includes(params.status as SaleStatus) ? params.status as SaleStatus : ""
-  const from = validDate(params.from)
-  const to = validDate(params.to)
+  const monthRange = periodRange("monthly")
+
+  // The register loads one complete, bounded window instead of a capped list:
+  // the current month by default, or the dates the manager asked for. Rows are
+  // filed by completion date once completed, then by creation date.
+  const requestedFrom = validDate(params.from)
+  const requestedTo = validDate(params.to)
+  const window =
+    requestedFrom && requestedTo && requestedTo < requestedFrom
+      ? { fromKey: requestedTo, toKey: requestedFrom }
+      : { fromKey: requestedFrom || monthRange.fromKey, toKey: requestedTo || storeDateKey(new Date()) }
+
+  const sales = salesInDateWindow(
+    await listManagerSalesForWindow(membership.storeId, window),
+    window
+  )
 
   const filtered = sales.filter((sale) => {
     if (status && sale.status !== status) return false
-    const createdDate = sale.createdAt.slice(0, 10)
-    if (from && createdDate < from) return false
-    if (to && createdDate > to) return false
     return matchesSaleSearch({
       saleNumber: sale.saleNumber,
       customerName: sale.customer?.fullName ?? null,
@@ -61,16 +72,26 @@ export default async function SalesPage({
         description={`Review real sale and manual payment records for ${membership.storeName}.`}
       />
 
+      <div className="flex flex-col gap-1 rounded-xl border border-[#E8E8ED] bg-white px-4 py-3 text-xs leading-5 text-[#68686D]">
+        <p className="text-sm font-semibold text-[#1D1D1F]">
+          Showing {window.fromKey} to {window.toKey} · Africa/Accra
+        </p>
+        <p>
+          Every sale filed in this window is loaded, however many there are. Adjust From and To to widen the window;
+          reports and CSV use the same complete window logic.
+        </p>
+      </div>
+
       <div className="flex gap-3 rounded-2xl border border-[#CDE9D7] bg-[#F0FAF3] p-4 text-sm leading-6 text-[#267343]">
         <CircleAlert className="mt-0.5 size-5 shrink-0" />
         <p>Only sales with both a completed state and persisted confirmed payment are counted as revenue. Draft and awaiting-payment amounts are excluded.</p>
       </div>
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Sale metrics">
-        <MetricCard label="Open drafts" value={String(drafts.length)} note="Employee-owned editable drafts" icon={ReceiptText} />
-        <MetricCard label="Awaiting payment" value={String(awaiting.length)} note="Not counted as revenue" icon={Clock3} tone="amber" />
-        <MetricCard label="Completed" value={String(completed.length)} note={`${cancelled.length} cancelled sale${cancelled.length === 1 ? "" : "s"}`} icon={ShoppingBag} tone="green" />
-        <MetricCard label="Revenue" value={formatPesewas(revenue)} note="Completed paid sales only" icon={ShoppingBag} tone="green" />
+        <MetricCard label="Open drafts" value={String(drafts.length)} note="Employee-owned editable drafts in this window" icon={ReceiptText} />
+        <MetricCard label="Awaiting payment" value={String(awaiting.length)} note="Not counted as revenue in this window" icon={Clock3} tone="amber" />
+        <MetricCard label="Completed" value={String(completed.length)} note={`${cancelled.length} cancelled sale${cancelled.length === 1 ? "" : "s"} in this window`} icon={ShoppingBag} tone="green" />
+        <MetricCard label="Revenue" value={formatPesewas(revenue)} note="Completed paid sales in this window" icon={ShoppingBag} tone="green" />
       </section>
 
       <Card className="rounded-2xl border-[#E8E8ED] bg-white shadow-none">
@@ -90,10 +111,10 @@ export default async function SalesPage({
               </select>
             </label>
             <label className="block text-xs font-medium text-[#68686D]">From
-              <input type="date" name="from" defaultValue={from} className="mt-1 h-10 w-full rounded-lg border border-[#E5E5E7] px-3 text-sm outline-none focus:border-[#6E0728]" />
+              <input type="date" name="from" defaultValue={window.fromKey} className="mt-1 h-10 w-full rounded-lg border border-[#E5E5E7] px-3 text-sm outline-none focus:border-[#6E0728]" />
             </label>
             <label className="block text-xs font-medium text-[#68686D]">To
-              <input type="date" name="to" defaultValue={to} className="mt-1 h-10 w-full rounded-lg border border-[#E5E5E7] px-3 text-sm outline-none focus:border-[#6E0728]" />
+              <input type="date" name="to" defaultValue={window.toKey} className="mt-1 h-10 w-full rounded-lg border border-[#E5E5E7] px-3 text-sm outline-none focus:border-[#6E0728]" />
             </label>
             <button type="submit" className="h-10 rounded-full bg-[#6E0728] px-5 text-sm font-semibold text-white">Apply filters</button>
           </form>
@@ -111,7 +132,7 @@ export default async function SalesPage({
                   <tbody>
                     {filtered.map((sale) => {
                       const itemCount = sale.items.filter((item) => item.status === "active").length
-                      const href = `/manager/sales?${new URLSearchParams({ ...(query ? { q: query } : {}), ...(status ? { status } : {}), ...(from ? { from } : {}), ...(to ? { to } : {}), sale: sale.id }).toString()}`
+                      const href = `/manager/sales?${new URLSearchParams({ ...(query ? { q: query } : {}), ...(status ? { status } : {}), from: window.fromKey, to: window.toKey, sale: sale.id }).toString()}`
                       return (
                         <tr key={sale.id} className={`border-t border-[#F0F0F2] ${selected?.id === sale.id ? "bg-[#FAF3F6]" : "bg-white hover:bg-[#FCF9FA]"}`}>
                           <td className="px-5 py-4"><Link href={href} className="block font-mono text-xs font-semibold text-[#6E0728]">{sale.saleNumber}</Link><p className="mt-1 text-xs text-[#86868B]">{dateTime(sale.createdAt)}</p></td>
