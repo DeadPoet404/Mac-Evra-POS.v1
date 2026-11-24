@@ -587,7 +587,7 @@ test("every correction action forwards an explicit record id and a reason", () =
 
 test("line removal is refused for received devices, the last line and closed invoices", () => {
   const linesTab = read("src/app/manager/opening-stock/lines-tab.tsx")
-  const migration = read("supabase/migrations/20261124120000_opening_stock_line_removal.sql")
+  const migration = read("supabase/migrations/20261124130000_opening_stock_line_removal.sql")
 
   // The affordance is disabled for exactly the cases the database refuses.
   assert.match(linesTab, /disabled=\{closed \|\| line\.quantityReceived > 0 \|\| invoiceLines\.length <= 1\}/)
@@ -609,4 +609,18 @@ test("line removal is refused for received devices, the last line and closed inv
   // The ledger stays append-only: no update/delete of corrections.
   assert.doesNotMatch(migration, /update public\.supplier_invoice_corrections/)
   assert.doesNotMatch(migration, /delete from public\.supplier_invoice_corrections/)
+
+  // `opening_stock_invoice_lines_view` is security_invoker, so its new
+  // `removed_at is null` predicate is evaluated with the caller's privileges.
+  // Without this column grant every manager read of the view fails.
+  assert.match(
+    migration,
+    /grant select \(removed_at\) on table public\.supplier_invoice_lines to authenticated/,
+    "readers need the column privilege the security_invoker view predicate uses"
+  )
+  assert.doesNotMatch(
+    migration,
+    /grant select \([^)]*removal_reason[^)]*\)/,
+    "the removal reason stays off the raw table"
+  )
 })

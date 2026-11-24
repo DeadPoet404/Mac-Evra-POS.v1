@@ -185,6 +185,14 @@ group by
   model.storage_gb,
   catalogue.supplier_sku;
 
+-- The line view is `security_invoker = true`, so its predicates are evaluated
+-- with the *caller's* privileges: the `removed_at is null` filter above means
+-- every reader needs SELECT on that column, or the view fails outright with
+-- "permission denied for table supplier_invoice_lines". Grant exactly that one
+-- column and nothing more — `removal_reason`, `removed_by_*` and every cost
+-- column stay unreadable directly.
+grant select (removed_at) on table public.supplier_invoice_lines to authenticated;
+
 -- 3. The audited removal RPC ---------------------------------------------------
 
 create or replace function public.remove_supplier_invoice_line(
@@ -222,8 +230,11 @@ begin
     raise exception using errcode = '42501', message = 'supplier invoice line not found';
   end if;
 
-  -- Lock the invoice first: a removal racing a correction or a confirmation must
-  -- serialise, because the removal resets that confirmation.
+  -- Lock the invoice first, exactly as `correct_supplier_invoice_line` does: a
+  -- removal racing a correction, another removal, or a confirmation must
+  -- serialise, because the removal resets that confirmation. Verified with two
+  -- concurrent sessions — the second waits for the first to finish and then fails
+  -- with "invoice line is already removed" rather than removing twice.
   select invoice.* into invoice_record
   from public.supplier_invoices invoice
   where invoice.id = line_record.invoice_id

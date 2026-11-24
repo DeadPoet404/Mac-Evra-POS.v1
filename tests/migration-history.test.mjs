@@ -1,0 +1,107 @@
+import assert from "node:assert/strict"
+import { readdirSync, readFileSync } from "node:fs"
+import test from "node:test"
+
+const migrations = readdirSync(new URL("../supabase/migrations", import.meta.url))
+  .filter((name) => name.endsWith(".sql"))
+  .sort()
+const suiteFiles = readdirSync(new URL("../supabase/tests", import.meta.url))
+  .filter((name) => name.endsWith(".test.sql"))
+  .sort()
+
+const VERSION = /^(\d{14})_[a-z0-9_]+\.sql$/
+const SUITE = /^(\d{3})_[a-z0-9_]+\.test\.sql$/
+
+/**
+ * Supabase applies `supabase/migrations/*.sql` in filename order and records the
+ * leading version. Two files sharing a version cannot both be applied to a fresh
+ * database, and on an already-migrated database the second is silently skipped —
+ * which is how a migration ends up merged but never executed. This suite exists
+ * because a new migration once reused `20261124120000`, a version already taken
+ * by `20261124120000_seed_iphone_device_models.sql`.
+ */
+test("every migration filename carries a 14-digit version", () => {
+  for (const name of migrations) {
+    assert.match(name, VERSION, `${name} must be named <14-digit version>_<snake_case>.sql`)
+  }
+})
+
+test("no two migrations share a version", () => {
+  const byVersion = new Map()
+  for (const name of migrations) {
+    const [, version] = name.match(VERSION)
+    const existing = byVersion.get(version)
+    assert.equal(
+      existing,
+      undefined,
+      existing
+        ? `${name} reuses version ${version}, already used by ${existing}`
+        : `${name} reuses version ${version}`
+    )
+    byVersion.set(version, name)
+  }
+})
+
+test("the opening-stock line removal migration sorts after every migration already on main", () => {
+  const removal = "20261124130000_opening_stock_line_removal.sql"
+  assert.ok(migrations.includes(removal), "the removal migration exists under its current version")
+
+  // These files were merged before the removal migration, so it must sort after
+  // all of them or a fresh database would apply it out of order.
+  const preExisting = [
+    "20261123060000_phase_01_foundation.sql",
+    "20261123120000_phase_02_inventory.sql",
+    "20261123180000_phase_03_employee_auth.sql",
+    "20261123200000_phase_04_employee_management.sql",
+    "20261123220000_phase_05_sales_customers.sql",
+    "20261123235900_phase_06_manual_payments.sql",
+    "20261124000000_opening_stock_intake.sql",
+    "20261124120000_seed_iphone_device_models.sql",
+  ]
+  assert.equal(migrations.at(-1), removal, "the removal migration is the newest file")
+  for (const name of preExisting) {
+    assert.ok(migrations.includes(name), `${name} is still present`)
+    assert.ok(name < removal, `${removal} must sort after ${name}`)
+  }
+})
+
+test("the removal migration builds on the intake tables it alters", () => {
+  const intake = readFileSync(
+    new URL("../supabase/migrations/20261124000000_opening_stock_intake.sql", import.meta.url),
+    "utf8"
+  )
+  const removal = readFileSync(
+    new URL("../supabase/migrations/20261124130000_opening_stock_line_removal.sql", import.meta.url),
+    "utf8"
+  )
+
+  // Sorting after intake is not enough on its own: the migration must not depend
+  // on anything the intake migration does not create.
+  for (const anchor of [
+    "create table public.supplier_invoices",
+    "create table public.supplier_invoice_lines",
+    "create table public.supplier_invoice_corrections",
+    "create or replace function private.opening_stock_actor_membership",
+    "create or replace function private.opening_stock_audit",
+    "create view public.opening_stock_invoice_lines_view",
+  ]) {
+    assert.ok(intake.includes(anchor), `intake migration provides ${anchor}`)
+  }
+  assert.match(removal, /alter table public\.supplier_invoice_lines/)
+  assert.match(
+    removal,
+    /create or replace view public\.opening_stock_invoice_lines_view/,
+    "the removal migration replaces the line view it filters"
+  )
+})
+
+test("database suites are numbered uniquely and share the migrations' ordering rule", () => {
+  for (const name of suiteFiles) {
+    assert.match(name, SUITE, `${name} must be named NNN_<snake_case>.test.sql`)
+  }
+  const numbers = suiteFiles.map((name) => name.match(SUITE)[1])
+  assert.equal(new Set(numbers).size, numbers.length, "two suites must not share a number")
+  const removalSuite = "009_opening_stock_line_removal.test.sql"
+  assert.ok(suiteFiles.includes(removalSuite), "the removal suite is picked up by db:test")
+  assert.equal(suiteFiles.at(-1), removalSuite, "the removal suite is the newest suite")
+})

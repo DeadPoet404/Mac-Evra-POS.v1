@@ -53,6 +53,22 @@ select ok(
   not has_table_privilege('authenticated', 'public.supplier_invoice_lines', 'delete'),
   'No client role holds a delete grant on invoice lines, so removal must go through the RPC'
 );
+-- `opening_stock_invoice_lines_view` is security_invoker, so its
+-- `removed_at is null` predicate is evaluated with the caller's privileges. Without
+-- this column grant every manager read of the line view fails with "permission
+-- denied for table supplier_invoice_lines".
+select ok(
+  has_column_privilege('authenticated', 'public.supplier_invoice_lines', 'removed_at', 'select'),
+  'Readers hold the column privilege the security_invoker line view needs for its own predicate'
+);
+select ok(
+  not has_column_privilege('authenticated', 'public.supplier_invoice_lines', 'removal_reason', 'select'),
+  'The removal reason is not readable straight off the table'
+);
+select ok(
+  not has_column_privilege('authenticated', 'public.supplier_invoice_lines', 'unit_cost_pesewas', 'select'),
+  'Granting the retirement marker does not widen access to purchase cost'
+);
 
 set constraints all immediate;
 set constraints all deferred;
@@ -256,7 +272,7 @@ select throws_ok(
 select lives_ok(
   $$insert into line_removal_fixture_ids (id, value)
     select 'invoice3', invoice_id
-    from public.create_supplier_invoice('00000000-0000-4000-8000-000000000011', 'Removal Supplier', 'RM-003', date '2026-11-24', 400000, 'Receipt guard fixture')$$,
+    from public.create_supplier_invoice('00000000-0000-4000-8000-000000000011', 'Removal Supplier', 'RM-003', date '2026-11-24', 800000, 'Receipt guard fixture')$$,
   'Manager creates the receipt-guard invoice'
 );
 select lives_ok(
