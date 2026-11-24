@@ -1,5 +1,5 @@
 import type { ElementType, ReactNode } from "react"
-import { CircleAlert, Database } from "lucide-react"
+import { CircleAlert } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Card, CardContent } from "@/components/ui/card"
@@ -61,17 +61,6 @@ export function MetricCard({
         </span>
       </CardContent>
     </Card>
-  )
-}
-
-export function DemoNotice({ children }: { children?: ReactNode }) {
-  return (
-    <div className="flex gap-3 rounded-xl border border-[#E6D8DD] bg-[#FCF8F9] px-4 py-3 text-xs leading-5 text-[#685159]">
-      <Database className="mt-0.5 size-4 shrink-0 text-[#6E0728]" aria-hidden="true" />
-      <p>
-        {children ?? "This workspace uses sample data and local interface state. No production records are being changed."}
-      </p>
-    </div>
   )
 }
 
