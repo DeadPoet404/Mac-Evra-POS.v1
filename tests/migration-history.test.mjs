@@ -65,7 +65,7 @@ test("the opening-stock line removal migration sorts after every migration alrea
 
   // Later forward-only migrations may sort after the removal migration, but the
   // removal migration must never stop sorting after the intake tables it alters.
-  const batteryHealth = "20261126120000_unknown_battery_health_staged_units.sql"
+  const batteryHealth = "20261126081209_unknown_battery_health_staged_units.sql"
   assert.ok(migrations.includes(batteryHealth), "the unknown-battery migration exists")
   assert.equal(migrations.at(-1), batteryHealth, "the unknown-battery migration is the newest file")
   assert.ok(removal < batteryHealth, `${batteryHealth} must sort after ${removal}`)

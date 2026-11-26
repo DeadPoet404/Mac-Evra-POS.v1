@@ -5,7 +5,7 @@ Source: ten photos of three restored iPhone handsets read through an iDevice /
 
 This document is an extraction record. **No device from this batch has been
 registered yet.** The database blocker for the nine handsets reading `No Data`
-was removed by `20261126120000_unknown_battery_health_staged_units.sql` (unknown
+was removed by `20261126081209_unknown_battery_health_staged_units.sql` (unknown
 battery health is now allowed on *staged* units only), but registration still
 needs a physical inspection pass and a manager session — see
 [What is still required](#what-is-still-required).
@@ -363,9 +363,11 @@ capacity evidence; the product-type strings (`iPhone14,5`, `iPhone13,2`,
 
 ## Battery health: how unknown is handled now
 
-> **Status: resolved in code, not yet applied.** The migration below is committed
-> but has *not* been applied to the hosted project. Until it is reviewed and
-> applied, the original constraint described in this section still stands.
+> **Status: applied to the hosted project on 2026-11-26** as migration version
+> `20261126081209_unknown_battery_health_staged_units`. Verified live:
+> `opening_stock_units.battery_health` is nullable, `inventory_devices.battery_health`
+> is still `NOT NULL`, and `record_opening_stock_unit_battery_health` exists.
+> **No devices have been staged yet** — see the note at the end of this section.
 
 Before the migration, the existing opening-stock receiving workflow **could not
 record a device whose battery health is unknown**, and neither could the legacy
@@ -384,7 +386,7 @@ inventory table:
 
 So for the nine handsets reading `No Data` there was no way to persist "battery
 health unknown" without either fabricating a number (explicitly forbidden) or
-changing the schema. `20261126120000_unknown_battery_health_staged_units.sql`
+changing the schema. `20261126081209_unknown_battery_health_staged_units.sql`
 does the latter, narrowly:
 
 - `opening_stock_units.battery_health` may be `null` **only while staged**;
@@ -405,10 +407,8 @@ attested.
 
 ## What is still required
 
-1. ~~A decision on the unknown-battery case~~ — **done**: unknown is allowed on
-   staged units only. Review and apply
-   `20261126120000_unknown_battery_health_staged_units.sql` to the hosted project
-   when it is safe to migrate.
+1. ~~A decision on the unknown-battery case~~ — **done and applied**: unknown is
+   allowed on staged units only (hosted version `20261126081209`).
 2. **A physical inspection pass** on all ten handsets to earn the other six
    attestations.
 3. **A manager session with `manage_inventory`, `access_manager_workspace`, and

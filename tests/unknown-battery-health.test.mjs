@@ -122,7 +122,7 @@ test("recording a measurement requires a real unit identifier", () => {
  * ------------------------------------------------------------------ */
 
 const migration = readFileSync(
-  path.resolve("supabase/migrations/20261126120000_unknown_battery_health_staged_units.sql"),
+  path.resolve("supabase/migrations/20261126081209_unknown_battery_health_staged_units.sql"),
   "utf8"
 )
 const read = (relativePath) => readFileSync(path.resolve(relativePath), "utf8")

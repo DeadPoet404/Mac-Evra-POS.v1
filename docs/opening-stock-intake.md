@@ -43,7 +43,7 @@ All money is integer GHS pesewas. Dates are bounded to non-future Africa/Accra d
 
 Many inspection screens report `Battery Life: No Data`, so a physically received handset can
 have no measurable battery health. Recording such a device used to require inventing a number.
-`supabase/migrations/20261126120000_unknown_battery_health_staged_units.sql` closes that gap
+`supabase/migrations/20261126081209_unknown_battery_health_staged_units.sql` closes that gap
 without weakening any safeguard:
 
 - `opening_stock_units.battery_health` is nullable, and `opening_stock_units_battery_valid`
