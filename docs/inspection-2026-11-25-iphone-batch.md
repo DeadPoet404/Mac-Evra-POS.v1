@@ -419,3 +419,398 @@ attested.
    present in the inspection photos and none may be invented.
 5. **A re-read of the iPhone 13 Pro serial number** and the two fields listed as
    unreadable above.
+
+---
+
+# Batch 2 — inspection extraction (second image set, received 2026-11-26)
+
+This section is **separate from Batch 1 above**. Batch 1 is the ten handsets read
+from `photo_1_*` / `photo_2_*`. Batch 2 is a second image set, uploaded on
+2026-11-26, whose inspection screens are in `photo_3_*` / `photo_4_*`. Nothing
+above has been altered; no Batch 1 value, IMEI, or conclusion is reused here
+except where a cross-batch duplicate check is stated explicitly.
+
+Upload inventory: 8 image files, all 960×1280, all distinct (no byte-identical
+duplicates — checked by md5):
+
+| File | Handset |
+| --- | --- |
+| `photo_3_2026-11-26_07-35-28.jpg` | B2-1 iPhone 13 128GB Blue |
+| `photo_3_2026-11-26_07-36-04.jpg` | B2-2 iPhone 13 256GB Starlight |
+| `photo_3_2026-11-26_07-36-24.jpg` | B2-3 iPhone 12 128GB Black |
+| `photo_3_2026-11-26_07-36-36.jpg` | B2-4 iPhone 12 256GB White |
+| `photo_3_2026-11-26_07-36-51.jpg` | B2-5 iPhone 14 128GB Midnight |
+| `photo_3_2026-11-26_07-37-51.jpg` | B2-6 iPhone 13 Pro 128GB Graphite |
+| `photo_4_2026-11-26_07-35-28.jpg` | B2-7 iPhone 13 128GB Starlight |
+| `photo_4_2026-11-26_07-36-24.jpg` | B2-8 iPhone 12 128GB Purple |
+
+**8 handsets are documented here.** Two further handsets (iPhone 14 128GB Purple
+and iPhone 13 Pro 128GB Green) were legible only in the message preview and have
+**no image file on disk**; they are recorded at the end under
+[Batch 2 — insufficient evidence](#batch-2--insufficient-evidence) and are
+*not* counted, validated, or staged.
+
+## Batch 2 — extracted fields
+
+Values transcribed exactly as displayed. `No Data` is recorded as unknown, never
+as a number. The percentage next to the charging icon is charge level, not
+battery health, and is never used as a battery value.
+
+### B2-1. iPhone 13 128GB Blue (`photo_3_2026-11-26_07-35-28.jpg`)
+
+| Field | Value |
+| --- | --- |
+| Brand | Apple |
+| Model | iPhone 13 |
+| Storage | 128GB |
+| Colour | Blue |
+| IMEI | 355839990795272 |
+| Model number (Sales Model) | MLDV3 CH/A |
+| Product type | iPhone14,5 (A2634) |
+| Serial number | GTK444FGPN |
+| ECID | 000405EA26EA401E |
+| UDID (panel footer) | 00008110-000405EA26EA401E |
+| iOS version | 27.0.1 (24A446) |
+| Battery health | No Data — unavailable |
+| Charge cycle count | 962 |
+| Activation status | Activated: Yes |
+| Apple ID Lock | Off |
+| iCloud | Off |
+| Jailbreak | No |
+| Production date | 10/8/2022 |
+| Sales region | China |
+| CPU | A15 Hexa |
+| Disk type | TLC |
+| Hard disk capacity | 9.18 GB / 119.09 GB |
+| Current charge (not health) | 80%, PC Charging (1.9W) |
+
+### B2-2. iPhone 13 256GB Starlight (`photo_3_2026-11-26_07-36-04.jpg`)
+
+| Field | Value |
+| --- | --- |
+| Brand | Apple |
+| Model | iPhone 13 |
+| Storage | 256GB |
+| Colour | Starlight |
+| IMEI | 352905619055902 |
+| Model number (Sales Model) | MLE13 CH/A |
+| Product type | iPhone14,5 (A2634) |
+| Serial number | D9QDH4FTQ4 |
+| ECID | 001639D10E47801E |
+| UDID (panel footer) | 00008110-001639D10E47801E |
+| iOS version | 27.2 (24B115) |
+| Battery health | No Data — unavailable |
+| Charge cycle count | 1339 |
+| Activation status | Activated: Yes |
+| Apple ID Lock | Off |
+| iCloud | Off |
+| Jailbreak | No |
+| Production date | 6/10/2022 |
+| Sales region | China |
+| CPU | A15 Hexa |
+| Disk type | TLC |
+| Hard disk capacity | not visible (flyout covered the row) |
+| Current charge (not health) | 93%, PC Charging |
+
+### B2-3. iPhone 12 128GB Black (`photo_3_2026-11-26_07-36-24.jpg`)
+
+| Field | Value |
+| --- | --- |
+| Brand | Apple |
+| Model | iPhone 12 |
+| Storage | 128GB |
+| Colour | Black |
+| IMEI | 355597756487829 |
+| Model number (Sales Model) | MGGU3 CH/A |
+| Product type | iPhone13,2 (A2404) |
+| Serial number | FFXGFT6F0DYL |
+| ECID | 00067D212E69001E |
+| UDID (panel footer) | 00008101-00067D212E69001E |
+| iOS version | 27.2 (24B115) |
+| Battery health | No Data — unavailable |
+| Charge cycle count | 1634 |
+| Activation status | Activated: Yes |
+| Apple ID Lock | Off |
+| iCloud | Off |
+| Jailbreak | No |
+| Production date | 9/19/2021 |
+| Sales region | China |
+| CPU | A14 Hexa |
+| Disk type | TLC |
+| Hard disk capacity | 9.35 GB / 119.09 GB |
+| Current charge (not health) | 82%, PC Charging |
+
+### B2-4. iPhone 12 256GB White (`photo_3_2026-11-26_07-36-36.jpg`)
+
+| Field | Value |
+| --- | --- |
+| Brand | Apple |
+| Model | iPhone 12 |
+| Storage | 256GB |
+| Colour | White (screen label reads lowercase `white`) |
+| IMEI | 353142766535796 |
+| Model number (Sales Model) | MGH23 CH/A |
+| Product type | iPhone13,2 (A2404) |
+| Serial number | DNPF2UKC0DYV |
+| ECID | 0005312A3432001E |
+| UDID (panel footer) | 00008101-0005312A3432001E |
+| iOS version | 27.0.1 (24A446) |
+| Battery health | No Data — unavailable |
+| Charge cycle count | 2903 |
+| Activation status | Activated: Yes |
+| Apple ID Lock | Off |
+| iCloud | Off |
+| Jailbreak | No |
+| Production date | 1/10/2021 |
+| Sales region | China |
+| CPU | A14 Hexa |
+| Disk type | TLC |
+| Hard disk capacity | not visible (panel cropped) |
+| Current charge (not health) | 63%, Not Charging |
+
+### B2-5. iPhone 14 128GB Midnight (`photo_3_2026-11-26_07-36-51.jpg`)
+
+| Field | Value |
+| --- | --- |
+| Brand | Apple |
+| Model | iPhone 14 |
+| Storage | 128GB (screen badge `128GB`; body sticker `128G`) |
+| Colour | Midnight |
+| IMEI | 356124717842528 |
+| Model number (Sales Model) | MPU93 CH/A |
+| Product type | iPhone14,7 (A2884) |
+| Serial number | `Q7X?GJM7L4` — **uncertain**, 4th character obscured by the cursor |
+| ECID | 00146091020A201E |
+| UDID (panel footer) | 00008110-00146091020A201E |
+| iOS version | 27.0 (24A437) |
+| Battery health | No Data — unavailable |
+| Charge cycle count | 1282 |
+| Activation status | Activated: Yes |
+| Apple ID Lock | Off |
+| iCloud | Off |
+| Jailbreak | No |
+| Production date | 7/29/2023 |
+| Sales region | China |
+| CPU | A15 Hexa |
+| Disk type | TLC |
+| Hard disk capacity | 9.07 GB / 119.07 GB |
+| Current charge (not health) | 81%, Not Charging |
+
+### B2-6. iPhone 13 Pro 128GB Graphite (`photo_3_2026-11-26_07-37-51.jpg`)
+
+| Field | Value |
+| --- | --- |
+| Brand | Apple |
+| Model | iPhone 13 Pro |
+| Storage | 128GB |
+| Colour | Graphite |
+| IMEI | 351540482698867 |
+| Model number (Sales Model) | MLT53 CH/A |
+| Product type | iPhone14,2 (A2639) |
+| Serial number | HY039MLV7K |
+| ECID | 00066C583A6B801E |
+| UDID (panel footer) | 00008110-00066C583A6B801E |
+| iOS version | 27.2 (24B115) |
+| Battery health | No Data — unavailable |
+| Charge cycle count | 1850 |
+| Activation status | Activated: Yes |
+| Apple ID Lock | Off |
+| iCloud | Off |
+| Jailbreak | No |
+| Production date | 1/27/2022 |
+| Sales region | China |
+| CPU | A15 Hexa |
+| Disk type | TLC |
+| Hard disk capacity | not visible (panel cropped) |
+| Current charge (not health) | 82%, Not Charging |
+
+### B2-7. iPhone 13 128GB Starlight (`photo_4_2026-11-26_07-35-28.jpg`)
+
+| Field | Value |
+| --- | --- |
+| Brand | Apple |
+| Model | iPhone 13 |
+| Storage | 128GB |
+| Colour | Starlight |
+| IMEI | 357106632493833 |
+| Model number (Sales Model) | MLDV3 CH/A |
+| Product type | iPhone14,5 (A2634) |
+| Serial number | HQWGW190M6 |
+| ECID | 000904910C99801E |
+| UDID (panel footer) | 00008110-000904910C99801E |
+| iOS version | 26.3.1 (23D8133) |
+| Battery health | **85%** (measured — screen shows `85%` with a `Details` link) |
+| Charge cycle count | 651 |
+| Activation status | Activated: Yes |
+| Apple ID Lock | Off |
+| iCloud | Off |
+| Jailbreak | No |
+| Production date | 12/26/2021 |
+| Sales region | China |
+| CPU | A15 Hexa |
+| Disk type | TLC |
+| Hard disk capacity | not visible (panel cropped) |
+| Current charge (not health) | not visible in frame |
+
+### B2-8. iPhone 12 128GB Purple (`photo_4_2026-11-26_07-36-24.jpg`)
+
+| Field | Value |
+| --- | --- |
+| Brand | Apple |
+| Model | iPhone 12 |
+| Storage | 128GB |
+| Colour | Purple |
+| IMEI | 355305619796133 |
+| Model number (Sales Model) | MJNC3 CH/A |
+| Product type | iPhone13,2 (A2404) |
+| Serial number | V27L00W4N5 |
+| ECID | 000260A90E86001E |
+| UDID (panel footer) | 00008101-000260A90E86001E |
+| iOS version | 17.6.1 (21G93) |
+| Battery health | **81%** (measured — screen shows `81%` with a `Details` link) |
+| Charge cycle count | 1103 |
+| Activation status | Activated: Yes |
+| Apple ID Lock | Off |
+| iCloud | Off |
+| Jailbreak | No (screen offers a `Jailbreak Now` action, i.e. not currently jailbroken) |
+| Production date | 4/11/2021 |
+| Sales region | China |
+| CPU | A14 Hexa |
+| Disk type | TLC |
+| Hard disk capacity | 7.92 GB / 119.09 GB |
+| Current charge (not health) | 84%, PC Charging |
+
+## Batch 2 — IMEI validation
+
+Ten candidate IMEIs were checked. Every IMEI below is 15 digits, passes the Luhn
+check digit, and passes the project's stricter real-IMEI validator
+(`isValidRealImei` in `src/lib/opening-stock.ts`, which additionally rejects the
+known test IMEIs, an all-identical 8-digit TAC, and fully ascending/descending
+digit strings). **No IMEI was corrected, reformatted, or invented**, and digits
+under glare or a cursor were flagged rather than guessed.
+
+| # | IMEI | Length | Luhn | Project validator | In-batch duplicate | Collides with Batch 1 | Already in database |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| B2-1 | 355839990795272 | 15 | pass | pass | none | no | no |
+| B2-2 | 352905619055902 | 15 | pass | pass | none | no | no |
+| B2-3 | 355597756487829 | 15 | pass | pass | none | no | no |
+| B2-4 | 353142766535796 | 15 | pass | pass | none | no | no |
+| B2-5 | 356124717842528 | 15 | pass | pass | none | no | no |
+| B2-6 | 351540482698867 | 15 | pass | pass | none | no | no |
+| B2-7 | 357106632493833 | 15 | pass | pass | none | no | no |
+| B2-8 | 355305619796133 | 15 | pass | pass | none | no | no |
+
+Verification method:
+
+- **Luhn + project validator** — re-ran the two functions from
+  `src/lib/opening-stock.ts` verbatim against all eight Batch 2 IMEIs *and* the
+  ten Batch 1 IMEIs in one pass, so the duplicate comparison is against the real
+  Batch 1 strings rather than a recollection of them. 0 failures, 8 of 8 unique.
+- **Database collision check** — `select 1 from public.inventory_devices` and
+  `public.opening_stock_units` filtered to the eight IMEIs returned **0 rows** in
+  each table. (The hosted project currently has 0 rows in both, so this is a
+  clean-slate confirmation rather than a partial-overlap one.)
+- **Batch 1 comparison** — no Batch 2 IMEI appears in the Batch 1 list above.
+
+## Batch 2 — model, storage, and invoice mapping
+
+Each model/storage pair already exists in `public.device_models`; **no catalogue
+row needs to be created**. Capacity was also checked against the invoice line it
+would land on (invoice `359c8f2c-17d8-48ba-8a41-59abc0dd3706`, store
+`66b9697f-b64f-4d2e-9b06-5b39111ef947`, status open, totals reconciled at
+GHS 14,655,000). All eight target lines have `units_staged = 0`.
+
+| # | Model / storage | `device_models` id | Invoice line # | Line id | Invoiced | Staged before | Batch 1 | Batch 2 | Cumulative | Fits? |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| B2-1 | iPhone 13 / 128 | `87878624-076c-4e63-a5c7-3577824e5cf2` | 7 | `0ffcd1b5-15f1-4900-91c8-c88ca9496b1c` | 7 | 0 | 2 | 2 | 4 | yes |
+| B2-7 | iPhone 13 / 128 | `87878624-076c-4e63-a5c7-3577824e5cf2` | 7 | `0ffcd1b5-15f1-4900-91c8-c88ca9496b1c` | 7 | 0 | (same line) | (same line) | 4 | yes |
+| B2-2 | iPhone 13 / 256 | `57923201-c24e-4f58-b495-acdb8e9421fc` | 8 | `3f7cef22-205f-46ce-85ce-651a6c5f8529` | 3 | 0 | 2 | 1 | 3 | yes |
+| B2-3 | iPhone 12 / 128 | `3f244b49-7dd2-419d-98bc-a6208b5d4a18` | 4 | `0a90b17d-7d81-4ce9-81ef-595d52a2a3c2` | 7 | 0 | 2 | 2 | 4 | yes |
+| B2-8 | iPhone 12 / 128 | `3f244b49-7dd2-419d-98bc-a6208b5d4a18` | 4 | `0a90b17d-7d81-4ce9-81ef-595d52a2a3c2` | 7 | 0 | (same line) | (same line) | 4 | yes |
+| B2-4 | iPhone 12 / 256 | `74aa208c-f12c-4724-976f-92911e0183b5` | 5 | `995d676e-cb72-4e31-b20c-1cd1578d94e9` | 3 | 0 | 2 | 1 | 3 | yes |
+| B2-5 | iPhone 14 / 128 | `8a976256-5073-45df-bc76-9faa36aaef3b` | 11 | `7b81e45e-3909-4a52-87bf-1a42a631ebc6` | 4 | 0 | 1 | 1 | 2 | yes |
+| B2-6 | iPhone 13 Pro / 128 | `341e3678-23bc-4c9f-a351-abdace15aa8d` | 9 | `25f16151-d409-4a2c-a6eb-8eea90787a4c` | 4 | 0 | 1 | 1 | 2 | yes |
+
+`Staged before` is the live `opening_stock_units` count for the line (0 for all
+six). `Cumulative` is Batch 1 + Batch 2 handsets mapped to that line; no line is
+over-subscribed. Every line also has `removed_at = null`, and the invoice's
+declared total still equals the calculated total, so the invoice remains
+reconciled.
+
+Every product-type string agrees with the named model (`iPhone14,5`=13,
+`iPhone14,7`=14, `iPhone13,2`=12, `iPhone14,2`=13 Pro). No model/storage
+disagreement was found, so no line is wrong and no line needs a correction.
+
+## Batch 2 — battery health
+
+Six of the eight handsets read `Battery Life: No Data`. Two (**B2-7** and
+**B2-8**) display a real measured percentage — 85% and 81% respectively — and
+those are recorded as measured values. The charging percentage shown beside the
+battery icon (63–93%) is charge level and is not used as battery health anywhere.
+
+Under the applied migration `20261126081209_unknown_battery_health_staged_units`,
+`opening_stock_units.battery_health` may be `null` while a unit is staged, so the
+six unknown units can be staged honestly as `NULL`; they still cannot be
+activated until a measurement is recorded. The two measured units (B2-7, B2-8)
+carry their real values.
+
+## Batch 2 — staging status
+
+**Devices staged from Batch 2: 0. Devices awaiting manager entry: 8.**
+
+Staging was not attempted, for the same non-code reason as Batch 1, re-confirmed
+before writing this section:
+
+- The connector session runs as `postgres` with `auth.uid()` = `null`;
+  `private.opening_stock_cost_visible` and `private.is_active_store_member` both
+  return `false`, so `private.opening_stock_invoice_reconciled` evaluates to
+  `false` and `public.receive_opening_stock_devices` returns
+  `ERROR 28000: authentication required`. This is the intended safeguard.
+- No manager credentials exist to use, and none were fabricated.
+- The eight physical attestations (display, cameras, buttons, connectivity,
+  charging port, IMEI-vs-device, label match, Activation Lock cleared) have not
+  been performed on these handsets. The photos evidence two of them; the other
+  six require a manager physically holding the phone.
+- No approved sale price exists for any unit. No price is present in the photos
+  and none was invented.
+
+## Batch 2 — uncertain or unreadable fields
+
+1. **B2-5 iPhone 14 128GB Midnight serial — `Q7X?GJM7L4`.** The mouse cursor sits
+   directly over the fourth character. Nine of the ten characters are legible at
+   maximum zoom; the fourth is not. Reported as uncertain, not guessed. The IMEI
+   for this handset is unambiguous.
+2. **Hard disk capacity** is missing on B2-2, B2-4, B2-6 and B2-7 — the panel was
+   cropped or a flyout covered the row. Not inferred.
+3. **B2-7 current charge** is not visible in the frame. Not inferred.
+4. **Colour is taken from the screen label and the handset body in frame.** No
+   cosmetic condition, scratch, dent, or screen-wear assessment was made — the
+   inspection screen does not report it and the photos are not a substitute.
+5. **Production dates are shown as `M/D/YYYY`** and transcribed as displayed.
+6. **`No Data` battery readings are recorded as unknown**, never as a charge
+   percentage and never as a placeholder number.
+
+## Batch 2 — insufficient evidence
+
+Two handsets appeared in the message preview but **have no image file on disk**
+(only `photo_3_*` ×6 and `photo_4_*` ×2 exist; the two `photo_2_*` files named
+in the attachment list are the Batch 1 photos, not these handsets). Nothing was
+extracted from the preview render, because it is not an original inspection
+capture and cannot be validated:
+
+- iPhone 14 128GB Purple — no usable source file.
+- iPhone 13 Pro 128GB Green — no usable source file.
+
+These are **not** counted in the eight above, are not validated, and must be
+re-photographed or the original files re-supplied before any extraction is
+recorded.
+
+## Batch 2 — what is still required
+
+1. A manager session with `manage_inventory`, `access_manager_workspace`, and
+   `approve_inventory_adjustments` to stage the eight handsets — six with
+   `battery_health = NULL`, B2-7 at 85, B2-8 at 81.
+2. A physical inspection pass to earn the other six attestations per handset.
+3. A re-read of the B2-5 serial number.
+4. Re-supply of the two missing image files.
+5. A positive approved sale price per unit at activation time.
