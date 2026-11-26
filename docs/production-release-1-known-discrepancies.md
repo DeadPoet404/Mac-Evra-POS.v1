@@ -75,3 +75,25 @@ reference `auth.uid()` and contain no open `then true` branch.
 `20261126170000_opening_stock_receipt_correction.sql` is prepared but **not
 applied**. It would rewrite the receipt details for D1 and D2, which is exactly
 the silent correction this release is required to avoid.
+
+---
+
+## Release verification — 2026-11-26
+
+| Check | Result |
+|---|---|
+| Build | `npm run build` passed; 21 routes |
+| Typecheck / lint | clean |
+| Tests | 142 pass, 0 fail |
+| Production URL | https://mac-evra-pos-v1.vercel.app |
+| Deployment | `dpl_ECcjT512J8tWUTiGMdPZnsfj1pPt`, target production, READY, aliased |
+| Staged units in production | 44 units, 44 distinct IMEIs, all `staged` |
+| Employee read of pending stock | 44 rows via `pending_stock_view`, scoped to store `66b9697f…` |
+| Anonymous read attempt | 0 rows, and `permission denied` without the grant |
+| Sellable inventory rows | 0 — nothing staged is reservable or priced |
+| Staged units with unknown battery | 31 (left `NULL`, not guessed) |
+| Auth gate | `/inventory` unauthenticated redirects to sign-in |
+
+Migrations applied for this release: `employee_pending_stock_view` and
+`revert_temporary_import_authorization`. `20261126170000_opening_stock_receipt_correction`
+was **not** applied.
