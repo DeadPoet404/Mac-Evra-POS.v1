@@ -39,6 +39,46 @@ Every new table has enabled and forced RLS. Composite foreign keys bind units, l
 
 All money is integer GHS pesewas. Dates are bounded to non-future Africa/Accra dates. Supplier names, SKUs, notes, reasons, colours, conditions, battery health, and inspection notes are length-, character-, and control-character validated. The supplier invoice number/reference is optional: a blank value becomes SQL `null` and the partial uniqueness index permits more than one unreferenced invoice, while a nonblank value is length-, character-, and control-character validated. IMEIs must be 15 digits with a valid Luhn check digit; known test/placeholder TACs, repeated TACs, and sequential placeholders are rejected. The inspection JSON must contain exactly the allowed fields and eight passing boolean checks. Batch rows are strictly device-scoped; there is no shared colour, condition, battery health, or inspection fallback.
 
+## Unknown battery health (staged units only)
+
+Many inspection screens report `Battery Life: No Data`, so a physically received handset can
+have no measurable battery health. Recording such a device used to require inventing a number.
+`supabase/migrations/20261126081209_unknown_battery_health_staged_units.sql` closes that gap
+without weakening any safeguard:
+
+- `opening_stock_units.battery_health` is nullable, and `opening_stock_units_battery_valid`
+  allows `null` **only** while `status = 'staged'`. An activated row must carry an integer in
+  1..100. The constraint is wrapped in `coalesce(...)` because `battery_health between 1 and 100`
+  evaluates to `NULL` for a `NULL` value, and a CHECK treats `NULL` as satisfied.
+- `inventory_devices.battery_health` stays `NOT NULL`, so sellable inventory can never hold an
+  unknown reading and employees never see one before a sale.
+- `receive_opening_stock_devices` accepts an absent, `null`, blank, or JSON-`null`
+  `battery_health` and stores SQL `null`. A *supplied* value that is not a whole percentage is
+  still rejected, so a typo cannot be silently stored as "unknown". Every other receiving rule
+  is unchanged: real Luhn IMEI, device-scoped colour/condition, all eight passing inspection
+  attestations, confirmed invoice totals, active model catalogue, quantity ceiling, deterministic
+  IMEI locks and cross-table duplicate checks.
+- `activate_opening_stock_unit` refuses a unit whose battery health is still unknown
+  (`'record the measured battery health before activation'`) in addition to every existing
+  activation guard, including the pricing-approval permission.
+- `record_opening_stock_unit_battery_health(unit_id, battery_health)` is the only way to fill the
+  gap. It requires `manage_inventory` + `access_manager_workspace` (not pricing approval), locks the
+  unit, accepts only a staged unit whose value is currently unknown, accepts only 1..100, and
+  writes one attributed audit event. It cannot revise a recorded reading, cannot touch an activated
+  unit, and cannot activate anything.
+- `private.validate_opening_stock_unit_update` still freezes every physical fact after receiving.
+  Battery health joins that list: once measured it is immutable, and on an activated unit it is
+  immutable without exception. The single permitted transition is `staged + unknown -> measured`.
+
+In the manager workspace an unmeasured device shows `Not measured` in the Battery column, its price
+cell is replaced by a **Record battery** control, and the receiving row explains that a blank field
+means "unavailable". Nothing is auto-filled: a blank reading stays `null` and is never coerced to
+`0` or `100`.
+
+`tests/unknown-battery-health.test.mjs` and `supabase/tests/010_unknown_battery_health.test.sql`
+cover the parser, the staging path, the inspection attestations that are *not* waived, the
+pre-activation block, the one-way measurement RPC, and the database-level guards on both tables.
+
 ## Transaction boundaries
 
 All writes go through `SECURITY DEFINER` RPCs with `set search_path = ''`. The browser never supplies an actor, membership, store, status, timestamp, audit event, or permission value.

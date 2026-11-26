@@ -44,7 +44,12 @@ export type OpeningStockDeviceInput = {
   imei: string
   colour: string
   condition: OpeningStockCondition
-  battery_health: number
+  /**
+   * `null` means the inspection screen reported no battery health ("No Data").
+   * It is not zero and it is never a default. An unknown reading may be staged
+   * but must be measured before the unit can be activated.
+   */
+  battery_health: number | null
   inspection: OpeningStockInspection
 }
 
@@ -229,12 +234,30 @@ function parseCommonDeviceFields(form: FormLike) {
   if (!openingStockConditions.includes(conditionValue as OpeningStockCondition)) {
     throw new Error("Select a valid inspected condition.")
   }
-  const batteryHealth = parsePositiveInteger(formString(form, "batteryHealth"), "battery health", 100)
   return {
     colour,
     condition: conditionValue as OpeningStockCondition,
-    battery_health: batteryHealth,
+    battery_health: parseOptionalBatteryHealth(formString(form, "batteryHealth")),
     inspection: parseInspectionInput(form),
+  }
+}
+
+/**
+ * A blank battery field means the inspection reported no measurement, which is
+ * recorded as unknown rather than guessed. A supplied value must still be a
+ * whole percentage in 1..100, so a typo can never be stored as "unknown".
+ */
+export function parseOptionalBatteryHealth(value: FormDataEntryValue | string | null | undefined) {
+  const input = typeof value === "string" ? value.trim() : ""
+  if (!input) return null
+  return parsePositiveInteger(input, "battery health", 100)
+}
+
+/** Fills in a battery measurement that receiving recorded as unknown. */
+export function parseBatteryHealthRecordInput(form: FormLike) {
+  return {
+    unitId: parseUuid(formString(form, "unitId"), "staged unit"),
+    batteryHealth: parsePositiveInteger(formString(form, "batteryHealth"), "battery health", 100),
   }
 }
 
@@ -491,4 +514,127 @@ export function summarizeOpeningStockInvoiceReconciliation(
     reconciled: costVisible && calculatedTotalPesewas === declaredTotalPesewas,
     costVisible,
   }
+}
+
+/**
+ * The three attestations the inspection photos actually evidence. They are
+ * recorded at receipt and must survive every later inspection update untouched.
+ */
+export const openingStockPreservedInspectionChecks = [
+  "imeiConfirmed",
+  "labelsMatch",
+  "activationLockCleared",
+] as const
+
+/** The five checks that can only be earned by a manager holding the handset. */
+export const openingStockPendingInspectionChecks = [
+  "displayPassed",
+  "camerasPassed",
+  "buttonsPassed",
+  "connectivityPassed",
+  "chargingPortPassed",
+] as const
+
+export type InspectionProgress = {
+  /** Checks currently recorded as passing. */
+  passed: readonly string[]
+  /** Checks still missing. */
+  pending: readonly string[]
+  /** True only when all eight are passing. */
+  complete: boolean
+}
+
+/**
+ * Reads a stored inspection document into progress.
+ *
+ * A check counts as passed only when its stored value is literally `true`.
+ * An absent key and a stored `false` are both "not passed" — the difference
+ * matters for the database's merge rule but not for whether the unit can be
+ * activated, which requires all eight.
+ */
+export function summarizeInspection(inspection: Record<string, unknown> | null | undefined): InspectionProgress {
+  const document = inspection ?? {}
+  const passed: string[] = []
+  const pending: string[] = []
+  for (const check of openingStockInspectionChecks) {
+    const field = inspectionFieldByCheck[check.name]
+    if (document[field] === true) passed.push(check.name)
+    else pending.push(check.name)
+  }
+  return { passed, pending, complete: pending.length === 0 }
+}
+
+/** True when every check the photos support is still recorded as passing. */
+export function preservedChecksIntact(inspection: Record<string, unknown> | null | undefined) {
+  const document = inspection ?? {}
+  return openingStockPreservedInspectionChecks.every(
+    (name) => document[inspectionFieldByCheck[name]] === true
+  )
+}
+
+/**
+ * Builds the `p_checks` payload for `complete_opening_stock_inspection`.
+ *
+ * Only the five pending checks are ever sent, so an existing attestation cannot
+ * be re-sent, re-derived, or accidentally cleared. Supplied values must be
+ * exactly `true`: a manager records what passed, and an unticked box is simply
+ * omitted rather than written as `false`.
+ */
+export function parseInspectionCompletionInput(
+  checks: Record<string, boolean | undefined> | null | undefined,
+  inspectionNotes: string | null | undefined
+) {
+  const supplied = checks ?? {}
+  const payload: Record<string, true> = {}
+
+  for (const name of openingStockPendingInspectionChecks) {
+    if (supplied[name] !== true) continue
+    payload[inspectionFieldByCheck[name]] = true
+  }
+
+  const unsupported = Object.keys(supplied).filter(
+    (name) => !(openingStockPendingInspectionChecks as readonly string[]).includes(name)
+  )
+  if (unsupported.length > 0) {
+    throw new Error(
+      "Only the pending physical checks can be recorded here. Photo-supported checks are preserved automatically."
+    )
+  }
+
+  if (Object.keys(payload).length === 0) {
+    throw new Error("Record at least one physical check that passed.")
+  }
+
+  const notes = typeof inspectionNotes === "string" ? inspectionNotes.trim() : ""
+  if (notes.length > 500) throw new Error("Inspection notes are too long.")
+  if (/[\u0000-\u001f\u007f]/.test(notes)) {
+    throw new Error("Inspection notes contain an unsupported character.")
+  }
+
+  return { checks: payload, notes: notes.length > 0 ? notes : null }
+}
+
+/** Validates a cosmetic condition a manager has assessed on the handset. */
+export function parseConditionRecordInput(value: FormDataEntryValue | string | null | undefined) {
+  const condition = typeof value === "string" ? value.trim().toLowerCase() : ""
+  if (!openingStockConditions.includes(condition as OpeningStockCondition)) {
+    throw new Error("Select the cosmetic condition you assessed: excellent, good or fair.")
+  }
+  return condition as OpeningStockCondition
+}
+
+/**
+ * The database key for each UI check name. Declared here (rather than imported
+ * from the workspace module) so these parsers stay dependency-free and usable
+ * from both the server action and the Node tests.
+ */
+export const inspectionFieldByCheck: Record<string, string> = {
+  imeiConfirmed: "imei_confirmed_physical",
+  labelsMatch: "identity_labels_match",
+  displayPassed: "display_passed",
+  camerasPassed: "cameras_passed",
+  buttonsPassed: "buttons_passed",
+  connectivityPassed: "connectivity_passed",
+  chargingPortPassed: "charging_port_passed",
+  activationLockCleared: "activation_lock_cleared",
 }
