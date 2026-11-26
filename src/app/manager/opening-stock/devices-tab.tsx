@@ -3,7 +3,11 @@
 import { Fragment, useMemo, useState } from "react"
 import { Check, CircleAlert, ChevronRight, LoaderCircle, Plus, ShieldCheck } from "lucide-react"
 
-import { openingStockInspectionChecks } from "@/lib/opening-stock"
+import {
+  openingStockInspectionChecks,
+  openingStockPendingInspectionChecks,
+  summarizeInspection,
+} from "@/lib/opening-stock"
 import type { OpeningStockCondition, OpeningStockUnitStatus } from "@/lib/opening-stock"
 import type {
   OpeningStockInvoice,
@@ -38,6 +42,13 @@ const conditionLabel: Record<OpeningStockCondition, string> = {
   fair: "Fair",
 }
 
+const pendingConditionLabel = "Not assessed"
+
+/** Human label for a unit's cosmetic condition, which may not be assessed yet. */
+function conditionText(condition: OpeningStockCondition | null) {
+  return condition === null ? pendingConditionLabel : conditionLabel[condition]
+}
+
 export function DevicesTab({
   invoice,
   lines,
@@ -48,6 +59,8 @@ export function DevicesTab({
   onActivate,
   onReprice,
   onRecordBattery,
+  onCompleteInspection,
+  onRecordCondition,
 }: {
   invoice: OpeningStockInvoice | null
   lines: readonly OpeningStockInvoiceLine[]
@@ -75,6 +88,12 @@ export function DevicesTab({
     reason: string
   ) => Promise<{ ok: boolean; message?: string }>
   onRecordBattery: (unitId: string, batteryHealth: string) => Promise<{ ok: boolean; message?: string }>
+  onCompleteInspection: (
+    unitId: string,
+    checks: Record<string, boolean | undefined>,
+    notes: string
+  ) => Promise<{ ok: boolean; message?: string }>
+  onRecordCondition: (unitId: string, condition: string) => Promise<{ ok: boolean; message?: string }>
 }) {
   const [entry, setEntry] = useState<DeviceEntryDraft>(() => emptyDeviceEntry(lines[0]?.id ?? ""))
   const [errors, setErrors] = useState<FieldErrors>({})
@@ -222,6 +241,8 @@ export function DevicesTab({
         onActivate={onActivate}
         onReprice={onReprice}
         onRecordBattery={onRecordBattery}
+        onCompleteInspection={onCompleteInspection}
+        onRecordCondition={onRecordCondition}
       />
     </div>
   )
@@ -500,18 +521,253 @@ function DeviceEntryForm({
   )
 }
 
+/**
+ * Everything a staged handset still needs before it can be activated, and the
+ * controls to supply it.
+ *
+ * The three attestations recorded at receipt are shown as fixed evidence, not as
+ * editable inputs: they are the only checks the inspection photos actually
+ * support, and the database rejects any attempt to clear them. Only the five
+ * checks that require the handset in hand can be ticked here.
+ */
+function InspectionCompletionPanel({
+  unit,
+  busy,
+  onCompleteInspection,
+  onRecordCondition,
+}: {
+  unit: OpeningStockUnit
+  busy: boolean
+  onCompleteInspection: (
+    unitId: string,
+    checks: Record<string, boolean | undefined>,
+    notes: string
+  ) => Promise<{ ok: boolean; message?: string }>
+  onRecordCondition: (unitId: string, condition: string) => Promise<{ ok: boolean; message?: string }>
+}) {
+  const progress = summarizeInspection(unit.inspection)
+  const [ticked, setTicked] = useState<Record<string, boolean>>({})
+  const [notes, setNotes] = useState("")
+  const [condition, setCondition] = useState("")
+  const [error, setError] = useState("")
+  const [saving, setSaving] = useState<"checks" | "condition" | null>(null)
+
+  const staged = unit.status === "staged"
+  const pendingChecks = openingStockInspectionChecks.filter((check) =>
+    (openingStockPendingInspectionChecks as readonly string[]).includes(check.name)
+  )
+  const preservedChecks = openingStockInspectionChecks.filter(
+    (check) => !(openingStockPendingInspectionChecks as readonly string[]).includes(check.name)
+  )
+  const remaining = pendingChecks.filter((check) => !progress.passed.includes(check.name))
+  const selectedCount = remaining.filter((check) => ticked[check.name] === true).length
+
+  async function submitChecks() {
+    setError("")
+    setSaving("checks")
+    const result = await onCompleteInspection(unit.id, ticked, notes)
+    setSaving(null)
+    if (!result.ok) {
+      setError(result.message ?? "The checks could not be recorded.")
+      return
+    }
+    setTicked({})
+    setNotes("")
+  }
+
+  async function submitCondition() {
+    setError("")
+    setSaving("condition")
+    const result = await onRecordCondition(unit.id, condition)
+    setSaving(null)
+    if (!result.ok) {
+      setError(result.message ?? "The condition could not be recorded.")
+      return
+    }
+    setCondition("")
+  }
+
+  if (!staged) {
+    return (
+      <p className="text-xs leading-5 text-[#68686D]">
+        This device is already sellable, so its inspection is closed.
+      </p>
+    )
+  }
+
+  return (
+    <div className="grid gap-3">
+      <div className="grid gap-2 sm:grid-cols-2">
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868B]">
+            Recorded at receipt
+          </p>
+          <ul className="mt-1 grid gap-y-0.5">
+            {preservedChecks.map((check) => (
+              <li key={check.name} className="flex items-center gap-1.5 text-xs text-[#68686D]">
+                <ShieldCheck className="size-3 text-[#267343]" aria-hidden="true" />
+                {check.label}
+                <span className="text-[10px] uppercase tracking-[0.06em] text-[#A1A1A6]">fixed</span>
+              </li>
+            ))}
+          </ul>
+        </div>
+        <div>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868B]">
+            {remaining.length === 0
+              ? "All physical checks recorded"
+              : `${remaining.length} physical check${remaining.length === 1 ? "" : "s"} outstanding`}
+          </p>
+          {remaining.length === 0 ? (
+            <p className="mt-1 text-xs leading-5 text-[#267343]">
+              Inspection complete. The device still needs a cosmetic condition
+              {unit.batteryHealth === null ? " and a battery measurement" : ""} before activation.
+            </p>
+          ) : (
+            <ul className="mt-1 grid gap-y-1">
+              {remaining.map((check) => (
+                <li key={check.name}>
+                  <label className="flex items-center gap-2 text-xs text-[#68686D]">
+                    <input
+                      type="checkbox"
+                      checked={ticked[check.name] === true}
+                      disabled={busy || saving !== null}
+                      onChange={(event) =>
+                        setTicked((current) => ({ ...current, [check.name]: event.target.checked }))
+                      }
+                      className="size-3.5 rounded border-[#D8D8DC] accent-[#1D1D1F]"
+                    />
+                    {check.label}
+                  </label>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </div>
+
+      {remaining.length > 0 ? (
+        <div className="grid gap-2">
+          <div>
+            <label
+              htmlFor={`inspection-notes-${unit.id}`}
+              className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868B]"
+            >
+              Inspection notes (optional)
+            </label>
+            <input
+              id={`inspection-notes-${unit.id}`}
+              value={notes}
+              maxLength={500}
+              disabled={busy || saving !== null}
+              onChange={(event) => setNotes(event.target.value)}
+              placeholder="Anything the next person should know about this handset"
+              className="mt-1 w-full rounded-lg border border-[#D8D8DC] px-2.5 py-1.5 text-xs text-[#1D1D1F] focus:border-[#1D1D1F] focus:outline-none"
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={submitChecks}
+              disabled={busy || saving !== null || selectedCount === 0}
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#1D1D1F] px-3 py-1.5 text-xs font-semibold text-white disabled:opacity-40"
+            >
+              {saving === "checks" ? <LoaderCircle className="size-3 animate-spin" aria-hidden="true" /> : null}
+              Record {selectedCount || ""} passing check{selectedCount === 1 ? "" : "s"}
+            </button>
+            <span className="text-[11px] text-[#86868B]">
+              Only tick checks you performed on this handset.
+            </span>
+          </div>
+        </div>
+      ) : null}
+
+      <div className="border-t border-[#F0F0F2] pt-2">
+        {unit.condition === null ? (
+          <div className="flex flex-wrap items-end gap-2">
+            <div>
+              <label
+                htmlFor={`condition-${unit.id}`}
+                className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868B]"
+              >
+                Cosmetic condition
+              </label>
+              <select
+                id={`condition-${unit.id}`}
+                value={condition}
+                disabled={busy || saving !== null}
+                onChange={(event) => setCondition(event.target.value)}
+                className="mt-1 block rounded-lg border border-[#D8D8DC] px-2.5 py-1.5 text-xs text-[#1D1D1F] focus:border-[#1D1D1F] focus:outline-none"
+              >
+                <option value="">Select condition</option>
+                {(["excellent", "good", "fair"] as const).map((value) => (
+                  <option key={value} value={value}>
+                    {conditionLabel[value]}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <button
+              type="button"
+              onClick={submitCondition}
+              disabled={busy || saving !== null || condition === ""}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-[#1D1D1F] px-3 py-1.5 text-xs font-semibold text-[#1D1D1F] disabled:opacity-40"
+            >
+              {saving === "condition" ? <LoaderCircle className="size-3 animate-spin" aria-hidden="true" /> : null}
+              Record condition
+            </button>
+            <span className="text-[11px] text-[#86868B]">
+              Recorded once, from your own assessment of the handset.
+            </span>
+          </div>
+        ) : (
+          <p className="text-xs text-[#68686D]">
+            <span className="font-medium text-[#1D1D1F]">Cosmetic condition: </span>
+            {conditionText(unit.condition)}
+            {unit.inspectionCompletedByDisplayName ? (
+              <span className="text-[#A1A1A6]"> · inspection completed by {unit.inspectionCompletedByDisplayName}</span>
+            ) : null}
+          </p>
+        )}
+        {unit.inspectionCompletedAt ? (
+          <p className="mt-1 text-[11px] text-[#A1A1A6]">
+            Last inspection update{" "}
+            {new Date(unit.inspectionCompletedAt).toLocaleString("en-GB", {
+              day: "2-digit",
+              month: "short",
+              year: "numeric",
+              hour: "2-digit",
+              minute: "2-digit",
+            })}
+          </p>
+        ) : null}
+      </div>
+
+      {error ? <p className="text-xs font-medium text-[#A13B34]">{error}</p> : null}
+    </div>
+  )
+}
+
 function DeviceTable({
   units,
   busy,
   onActivate,
   onReprice,
   onRecordBattery,
+  onCompleteInspection,
+  onRecordCondition,
 }: {
   units: readonly OpeningStockUnit[]
   busy: boolean
   onActivate: (unitId: string, approvedPriceGhs: string) => Promise<{ ok: boolean; message?: string }>
   onReprice: (unitId: string, expectedPriceGhs: string, newPriceGhs: string, reason: string) => Promise<{ ok: boolean; message?: string }>
   onRecordBattery: (unitId: string, batteryHealth: string) => Promise<{ ok: boolean; message?: string }>
+  onCompleteInspection: (
+    unitId: string,
+    checks: Record<string, boolean | undefined>,
+    notes: string
+  ) => Promise<{ ok: boolean; message?: string }>
+  onRecordCondition: (unitId: string, condition: string) => Promise<{ ok: boolean; message?: string }>
 }) {
   const [expanded, setExpanded] = useState<string | null>(null)
 
@@ -569,7 +825,7 @@ function DeviceTable({
                     <td className="px-3 py-2 text-[#68686D]">{unit.colour}</td>
                     <td className="px-3 py-2">
                       <span className="rounded-full bg-[#F7F7F8] px-2 py-0.5 text-[11px] font-medium text-[#68686D]">
-                        {conditionLabel[unit.condition]}
+                        {conditionText(unit.condition)}
                       </span>
                     </td>
                     <td className="px-3 py-2 text-right tabular-nums text-[#68686D]">
@@ -597,31 +853,19 @@ function DeviceTable({
                   {open ? (
                     <tr className="border-b border-[#F0F0F2] bg-[#FCFCFD]">
                       <td colSpan={7} className="px-4 py-3">
-                        <div className="grid gap-3 sm:grid-cols-2">
-                          <div>
+                        <div className="grid gap-4">
+                          <div className="flex flex-wrap items-baseline justify-between gap-2">
                             <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#86868B]">
                               Inspection · {passed} of {openingStockInspectionChecks.length} passed
                             </p>
-                            <ul className="mt-1 grid gap-x-4 gap-y-0.5 sm:grid-cols-2">
-                              {openingStockInspectionChecks.map((check) => (
-                                <li key={check.name} className="flex items-center gap-1.5 text-xs text-[#68686D]">
-                                  {inspection.checks[check.name] ? (
-                                    <Check className="size-3 text-[#267343]" aria-hidden="true" />
-                                  ) : (
-                                    <CircleAlert className="size-3 text-[#A1A1A6]" aria-hidden="true" />
-                                  )}
-                                  {check.label}
-                                </li>
-                              ))}
-                            </ul>
                             {inspection.notes ? (
-                              <p className="mt-1.5 text-xs leading-5 text-[#68686D]">
+                              <p className="text-xs leading-5 text-[#68686D]">
                                 <span className="font-medium text-[#1D1D1F]">Notes: </span>
                                 {inspection.notes}
                               </p>
                             ) : null}
                           </div>
-                          <dl className="space-y-1 text-xs">
+                          <dl className="grid gap-1 text-xs sm:grid-cols-3">
                             <div className="flex justify-between gap-3">
                               <dt className="text-[#86868B]">Received by</dt>
                               <dd className="text-[#1D1D1F]">
@@ -648,6 +892,12 @@ function DeviceTable({
                               </dd>
                             </div>
                           </dl>
+                          <InspectionCompletionPanel
+                            unit={unit}
+                            busy={busy}
+                            onCompleteInspection={onCompleteInspection}
+                            onRecordCondition={onRecordCondition}
+                          />
                         </div>
                       </td>
                     </tr>

@@ -17,6 +17,7 @@
  */
 
 import {
+  inspectionFieldByCheck,
   isValidRealImei,
   normalizeOpeningStockImei,
   openingStockConditions,
@@ -276,16 +277,7 @@ export const IMEI_PLACEHOLDER = "357000000000017"
  * device's attestation is always written with the exact key names that
  * `private.is_valid_opening_stock_inspection` requires.
  */
-export const INSPECTION_FIELD_BY_NAME: Record<string, string> = {
-  imeiConfirmed: "imei_confirmed_physical",
-  labelsMatch: "identity_labels_match",
-  displayPassed: "display_passed",
-  camerasPassed: "cameras_passed",
-  buttonsPassed: "buttons_passed",
-  connectivityPassed: "connectivity_passed",
-  chargingPortPassed: "charging_port_passed",
-  activationLockCleared: "activation_lock_cleared",
-}
+export const INSPECTION_FIELD_BY_NAME: Record<string, string> = inspectionFieldByCheck
 
 /** Rejects the example IMEI shipped in the input placeholder, and other known fake values. */
 export function isPlaceholderImei(value: string) {

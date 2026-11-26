@@ -77,7 +77,14 @@ test("the opening-stock line removal migration sorts after every migration alrea
   assert.ok(migrations.includes(pendingInspection), "the pending-inspection migration exists")
   assert.ok(migrations.includes(temporaryAuthorization), "the temporary authorization migration exists")
   assert.ok(batteryHealth < pendingInspection, `${pendingInspection} must sort after ${batteryHealth}`)
-  assert.equal(migrations.at(-1), temporaryAuthorization, "the temporary authorization is the newest file")
+
+  // The inspection-completion workflow must sort after the pending-inspection
+  // migration whose columns and RPC it builds on, and after the temporary
+  // authorization it deliberately does not depend on.
+  const inspectionWorkflow = "20261126150000_inspection_completion_workflow.sql"
+  assert.ok(migrations.includes(inspectionWorkflow), "the inspection completion migration exists")
+  assert.ok(pendingInspection < inspectionWorkflow, `${inspectionWorkflow} must sort after ${pendingInspection}`)
+  assert.equal(migrations.at(-1), inspectionWorkflow, "the inspection completion migration is the newest file")
 })
 
 test("the removal migration builds on the intake tables it alters", () => {
