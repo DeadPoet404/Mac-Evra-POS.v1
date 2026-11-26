@@ -16,7 +16,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
 
 import { addSaleItemAction } from "@/app/new-sale/actions"
-import type { AuthorizedInventoryDevice } from "@/lib/inventory-server"
+import type { AuthorizedInventoryDevice, PendingStockDevice } from "@/lib/inventory-server"
 import { employeeSaleStepHref, findInventoryByImei, normalizeImeiEntry } from "@/lib/sale-journey"
 import { formatPesewas } from "@/lib/sales"
 
@@ -32,6 +32,7 @@ const allowedReturnPaths = ["/home", "/trade-in", "/inventory"]
 export function ImeiVerification({
   saleId,
   inventory,
+  pendingStock,
   canReserve,
   hasAddedProduct = false,
   saleTotalPesewas = 0,
@@ -40,6 +41,7 @@ export function ImeiVerification({
 }: {
   saleId: string
   inventory: AuthorizedInventoryDevice[]
+  pendingStock: PendingStockDevice[]
   canReserve: boolean
   hasAddedProduct?: boolean
   saleTotalPesewas: number
@@ -62,6 +64,10 @@ export function ImeiVerification({
   const processingRef = useRef(false)
 
   const device = useMemo(() => findInventoryByImei(inventory, imei), [imei, inventory])
+  const pendingDevice = useMemo(
+    () => pendingStock.find((item) => normalizeImeiEntry(item.imei) === imei) ?? null,
+    [imei, pendingStock]
+  )
   const completeImei = imei.length === 15
   const available = device?.status === "available"
 
@@ -551,7 +557,15 @@ export function ImeiVerification({
                 </p>
               ) : null}
 
-              {completeImei && !device ? (
+              {completeImei && !device && pendingDevice ? (
+                <div role="status" className="mt-3 rounded-xl border border-amber-300 bg-amber-50 p-4 text-sm text-amber-900">
+                  <p className="font-semibold">Registered — pending inspection</p>
+                  <p className="mt-1">{pendingDevice.model} {pendingDevice.storage} is recorded in this store, but has not completed inspection.</p>
+                  <p className="mt-1 font-medium">This handset cannot be reserved or added to a sale yet.</p>
+                </div>
+              ) : null}
+
+              {completeImei && !device && !pendingDevice ? (
                 <p className="mt-3 text-sm text-red-600">
                   No matching device was found in this store. Check the IMEI and try again.
                 </p>

@@ -10,7 +10,7 @@ import {
 import { ImeiVerification } from "@/app/new-sale/imei-verification"
 import { EmployeeHeader } from "@/components/employee/employee-header"
 import { requirePermissions } from "@/lib/auth/server"
-import { listAuthorizedInventory } from "@/lib/inventory-server"
+import { listAuthorizedInventory, listPendingStock } from "@/lib/inventory-server"
 import { employeeSaleResumeStep, employeeSaleStepHref } from "@/lib/sale-journey"
 import { formatPesewas } from "@/lib/sales"
 import { getPersistentSale, listEmployeeSales } from "@/lib/sales-server"
@@ -54,6 +54,7 @@ const returnTo = allowedReturnPaths.includes(params.from ?? "")
   }
 
   const inventory = selectedSale ? await listAuthorizedInventory(membership.storeId) : []
+  const pendingStock = selectedSale ? await listPendingStock(membership.storeId) : []
 
   if (selectedSale?.status === "awaiting_payment") {
     redirect(employeeSaleStepHref("payment", selectedSale.id))
@@ -81,6 +82,7 @@ const returnTo = allowedReturnPaths.includes(params.from ?? "")
       <ImeiVerification
         saleId={selectedSale.id}
         inventory={inventory}
+        pendingStock={pendingStock}
         canReserve={canReserve}
         hasAddedProduct={activeItems.length > 0}
         saleTotalPesewas={selectedSale.totalPesewas}
