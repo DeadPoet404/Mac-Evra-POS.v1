@@ -887,3 +887,88 @@ recorded cosmetic condition now that `condition` is nullable while staged.
 > migration restores the original `opening_stock_invoice_reconciled` body and
 > drops `private.opening_stock_invoice_totals_match` /
 > `private.opening_stock_recipient_membership` once the import is accepted.
+
+---
+
+# Batch 3 — inspection extraction (third image set, 2026-11-26)
+
+15 image files (`photo_4_*` ×3, `photo_5_*` ×4, `photo_6_*` ×3, `photo_7_*` ×2,
+`photo_8_*` ×2, `photo_9_*` ×1), all distinct by md5. **14 handsets staged; 1
+rejected as a duplicate.** Nothing activated, priced or sold.
+
+| # | Model / storage / colour | IMEI | Serial | Sales model | iOS | Cycles | Battery |
+|---|---|---|---|---|---|---|---|
+| B3-01 | 13 / 128GB Midnight | 351062826074903 | MH75HXFY2W | MLDU3 CH/A | 27.0.1 (24A446) | 1083 | No Data |
+| B3-02 | 12 / 128GB Blue | 353063110205722 | F18DJ1X500YP | MGGX3 CH/A | 26.5.2 (23F84) | 1362 | **75% measured** |
+| B3-03 | 14 / 256GB Midnight | 355374175939180 | G92DXWQGPC | MPVU3 CH/A | 27.2 (24B115) | 1804 | No Data |
+| B3-04 | 13 Pro / 256GB Sierra Blue | 357174291687699 | RYVR2912CN | MLTE3 CH/A | 27.2 (24B115) | 2167 | No Data ⚠️ **Apple ID Lock ON** |
+| B3-05 | 13 / 128GB Starlight | 352184991135498 | JNQDGXXGV4 | NLA43 LL/A | 26.6.1 (23G83) | 581 | **88% measured** |
+| B3-06 | 12 / 128GB Red | 353063116530008 | F17DK4M40DYN | MGGW3 CH/A | 27.2 (24B115) | 1905 | No Data |
+| B3-07 | 13 Pro / 256GB Graphite | 356133314172833 | `T6HVC?YDXR` ⚠️ | MLR63 LL/A | 26.5.2 (23F84) | 1725 | **78% measured** |
+| B3-08 | 12 / 128GB Green | 350148179039725 | FFWFPF430DYQ | MGGY3 CH/A | 27.2 (24B115) | 1553 | No Data |
+| B3-09 | 14 Plus / 128GB Starlight | 351111565339819 | MTXGL4HD4W | MQ363 CH/A | 27.2 (24B115) | 2020 | No Data |
+| B3-10 | 12 / 256GB Green | 352011862647220 | G6TF305ADDYY | MGH53 ZA/A | 27.0.1 (24A446) | 1923 | No Data ❌ **duplicate** |
+| B3-11 | 14 Plus / 128GB Midnight | 351111564542926 | T49W7ZRC23 | MQ353 CH/A | 27.2 (24B115) | 1086 | No Data |
+| B3-12 | 11 / 128GB Black | 356346100727657 | DNPZFZJDN741 | MWNT2 CH/A | 26.6.2 (23G90) | 1695 | **75% measured** |
+| B3-13 | 14 / 128GB Purple | 357684399007640 | KLWWDQ90T3 | MPUW3 CH/A | 27.2 (24B115) | 1477 | No Data |
+| B3-14 | 14 / 128GB Midnight | 359529186364928 | M9XJ4N9961 | MPU93 CH/A | 27.2 (24B115) | 1763 | No Data |
+| B3-15 | 13 Pro / 256GB Gold | 354071159671307 | `XGL?2D16PM` ⚠️ | MLTD3 CH/A | 26.3.1 (23D8133) | 245 | **95% measured** |
+
+## IMEI validation and duplicates
+
+All 15 are 15 digits and pass both Luhn and `isValidRealImei`. All 15 are unique
+within this batch and none collide with Batch 1 or Batch 2.
+
+**B3-10 (`352011862647220`) is rejected.** It is the same handset as Batch 1
+device #7 (iPhone 12 256GB Green), already staged on invoice line 5 on
+2026-11-26. Re-staging it would violate `opening_stock_units_imei_unique` and
+would double-count one physical phone. The IMEI is good; the *device* was already
+recorded. Line 5 is also already full at 3/3, so there is no capacity for it
+regardless.
+
+## Inspection evidence
+
+Every staged row carries only the attestations the images evidence:
+
+- **13 of 14**: `imei_confirmed_physical`, `identity_labels_match`,
+  `activation_lock_cleared`.
+- **B3-04 and B3-07**: only `imei_confirmed_physical` and
+  `identity_labels_match`. B3-04 shows **Apple ID Lock: On** (iCloud On), so
+  `activation_lock_cleared` must never be attested for it. B3-07's lock status was
+  still spinning in the capture, so it is unverified rather than assumed clear.
+
+Cosmetic `condition` is left `NULL` on all 14. The five physical checks
+(display, cameras, buttons, connectivity, charging port) are left pending on all
+14. Neither migration 150000 nor any activation requirement was applied or
+relaxed.
+
+## Staging result
+
+| Line | Model / storage | Invoiced | Staged | Remaining |
+|---|---|---|---|---|
+| 4 | 12 / 128 | 7 | 7 | 0 |
+| 5 | 12 / 256 | 3 | 3 | 0 |
+| 7 | 13 / 128 | 7 | 6 | 1 |
+| 10 | 13 Pro / 256 | 3 | 3 | 0 |
+| 11 | 14 / 128 | 4 | 4 | 0 |
+| 12 | 14 / 256 | 2 | 1 | 1 |
+| 14 | 14 Plus / 128 | 2 | 2 | 0 |
+| 15 | 15 Plus / 256 | 2 | 1 | 1 |
+
+`opening_stock_units` now holds **32 rows / 32 distinct IMEIs**, all `staged`, all
+with `condition IS NULL`, none priced, and `inventory_devices` /
+`store_inventory` / `opening_stock_price_changes` all still empty.
+
+## Uncertain fields
+
+1. **B3-07 iPhone 13 Pro 256GB Graphite serial** — `T6HVC?YDXR`. The mouse cursor
+   covers the sixth character. Reported uncertain, not guessed. Its IMEI is
+   unambiguous and is also printed on the device's own label (`356133314172833`).
+2. **B3-15 iPhone 13 Pro 256GB Gold serial** — `XGL?2D16PM`, cursor over the
+   fourth character.
+3. **B3-04 Sales Model is `MLTE3`**, but the handsets are labelled `iPhone 13 Pro`
+   and the images show 256GB on both the badge and the body sticker, so it is
+   mapped to the 13 Pro 256 line. Note the part-number anomaly.
+4. **B3-07 serial `T6HVC6YDXR`** appears twice in the image (once in the panel,
+   once on the paper label); the label reads `T6HVC6YDXR`, which is the more
+   likely reading of the cursor-covered character.
