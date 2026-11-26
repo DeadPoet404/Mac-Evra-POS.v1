@@ -67,8 +67,17 @@ test("the opening-stock line removal migration sorts after every migration alrea
   // removal migration must never stop sorting after the intake tables it alters.
   const batteryHealth = "20261126081209_unknown_battery_health_staged_units.sql"
   assert.ok(migrations.includes(batteryHealth), "the unknown-battery migration exists")
-  assert.equal(migrations.at(-1), batteryHealth, "the unknown-battery migration is the newest file")
   assert.ok(removal < batteryHealth, `${batteryHealth} must sort after ${removal}`)
+
+  // Pending-inspection staging follows the unknown-battery relaxation, and the
+  // temporary import authorization follows that, because it redefines the
+  // reconciliation helper the staging migration does not touch.
+  const pendingInspection = "20261126140000_pending_inspection_staging.sql"
+  const temporaryAuthorization = "20261126140100_temporary_import_authorization.sql"
+  assert.ok(migrations.includes(pendingInspection), "the pending-inspection migration exists")
+  assert.ok(migrations.includes(temporaryAuthorization), "the temporary authorization migration exists")
+  assert.ok(batteryHealth < pendingInspection, `${pendingInspection} must sort after ${batteryHealth}`)
+  assert.equal(migrations.at(-1), temporaryAuthorization, "the temporary authorization is the newest file")
 })
 
 test("the removal migration builds on the intake tables it alters", () => {
