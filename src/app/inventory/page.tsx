@@ -3,7 +3,7 @@ import { BatteryMedium, Search, ShieldCheck, ShoppingBag, Smartphone } from "luc
 
 import { EmployeeHeader } from "@/components/employee/employee-header"
 import { requirePermissions } from "@/lib/auth/server"
-import { listAuthorizedInventory, type PersistentInventoryStatus } from "@/lib/inventory-server"
+import { listAuthorizedInventory, listPendingStock, type PersistentInventoryStatus } from "@/lib/inventory-server"
 import { formatPesewas } from "@/lib/sales"
 
 const statuses: Array<"all" | PersistentInventoryStatus> = ["all", "available", "reserved", "sold"]
@@ -15,7 +15,10 @@ export default async function EmployeeInventoryPage({
 }) {
   const { membership } = await requirePermissions(["access_employee_workspace"], { nextPath: "/inventory" })
   const params = await searchParams
-  const inventory = await listAuthorizedInventory(membership.storeId)
+  const [inventory, pendingStock] = await Promise.all([
+    listAuthorizedInventory(membership.storeId),
+    listPendingStock(membership.storeId),
+  ])
   const query = params.q?.trim().toLowerCase() ?? ""
   const status = statuses.includes(params.status as "all" | PersistentInventoryStatus)
     ? params.status as "all" | PersistentInventoryStatus
@@ -54,9 +57,54 @@ export default async function EmployeeInventoryPage({
           </section>
         ) : <div className="mt-6 rounded-2xl border border-dashed border-[#D8D8DC] bg-white p-14 text-center"><Search className="mx-auto size-7 text-[#A1A1A6]" /><h2 className="mt-4 font-semibold">No matching inventory</h2><p className="mt-2 text-sm text-[#86868B]">Change the search or status filter.</p></div>}
 
+        <PendingStock pending={pendingStock} />
+
         <div className="mt-7 flex gap-3 rounded-xl border border-[#E8E8ED] bg-white p-4 text-xs leading-5 text-[#68686D]"><ShieldCheck className="mt-0.5 size-4 shrink-0 text-[#6E0728]" /><p>Inventory is store-scoped through RLS. Availability is rechecked and locked only when a device is added to a persistent sale draft.</p></div>
       </div>
     </main>
+  )
+}
+
+/**
+ * Received handsets that are still awaiting inspection. They are shown so staff
+ * know the stock exists and is not yet sellable — there is deliberately no
+ * action, price or "add to sale" control here, because a pending unit has no
+ * inventory row to reserve.
+ */
+function PendingStock({ pending }: { pending: Awaited<ReturnType<typeof listPendingStock>> }) {
+  if (!pending.length) return null
+
+  return (
+    <section className="mt-10" aria-label="Pending inspection stock">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <h2 className="text-[22px] font-semibold tracking-[-0.4px] text-[#6E0728]">Pending inspection</h2>
+          <p className="mt-1 text-sm text-[#86868B]">
+            {pending.length} handset{pending.length === 1 ? "" : "s"} received but not yet cleared for sale. These cannot be sold or reserved until a manager completes inspection and activation.
+          </p>
+        </div>
+      </div>
+
+      <div className="mt-4 grid gap-4 md:grid-cols-2">
+        {pending.map((item) => (
+          <article key={item.unitId} className="rounded-2xl border border-dashed border-[#E0D2D8] bg-white p-5">
+            <div className="flex gap-4">
+              <span className="flex size-14 shrink-0 items-center justify-center rounded-2xl bg-[#FBF3F6] text-[#6E0728]"><Smartphone size={25} /></span>
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-center gap-2">
+                  <h3 className="font-semibold">{item.model}</h3>
+                  <span className="rounded-full bg-[#FFF9EB] px-2 py-0.5 text-[10px] font-semibold text-[#8A6517]">Pending inspection</span>
+                </div>
+                <p className="mt-1 text-sm text-[#86868B]">{item.storage} · {item.colour}</p>
+                <p className="mt-2 inline-flex items-center gap-1 text-xs text-[#68686D]"><BatteryMedium size={13} /> {item.batteryHealth === null ? "Battery not measured" : `${item.batteryHealth}% battery`}</p>
+                <p className="mt-2 font-mono text-[11px] text-[#86868B]">IMEI {item.imei}</p>
+              </div>
+            </div>
+            <p className="mt-4 border-t border-[#F0F0F2] pt-3 text-xs text-[#86868B]">Awaiting inspection — not available for sale.</p>
+          </article>
+        ))}
+      </div>
+    </section>
   )
 }
 

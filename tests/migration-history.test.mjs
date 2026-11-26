@@ -90,7 +90,17 @@ test("the opening-stock line removal migration sorts after every migration alrea
   const receiptCorrection = "20261126170000_opening_stock_receipt_correction.sql"
   assert.ok(migrations.includes(receiptCorrection), "the receipt correction migration exists")
   assert.ok(inspectionWorkflow < receiptCorrection, `${receiptCorrection} must sort after ${inspectionWorkflow}`)
-  assert.equal(migrations.at(-1), receiptCorrection, "the receipt correction migration is the newest file")
+
+  // The employee pending-stock view must sort after the pending-inspection
+  // staging migration whose table it projects, and the authorization revert must
+  // come after the temporary grant it undoes.
+  const pendingStockView = "20261126180000_employee_pending_stock_view.sql"
+  const authRevert = "20261126190000_revert_temporary_import_authorization.sql"
+  assert.ok(migrations.includes(pendingStockView), "the employee pending-stock view migration exists")
+  assert.ok(migrations.includes(authRevert), "the authorization revert migration exists")
+  assert.ok(receiptCorrection < pendingStockView, `${pendingStockView} must sort after ${receiptCorrection}`)
+  assert.ok(temporaryAuthorization < authRevert, `${authRevert} must sort after ${temporaryAuthorization}`)
+  assert.equal(migrations.at(-1), authRevert, "the authorization revert migration is the newest file")
 })
 
 test("the removal migration builds on the intake tables it alters", () => {

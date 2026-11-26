@@ -5,6 +5,23 @@ import { createClient } from "@/lib/supabase/server"
 export type PersistentInventoryStatus = "available" | "reserved" | "sold"
 export type PersistentDeviceCondition = "excellent" | "good" | "fair"
 
+/**
+ * A received handset that is not yet sellable. It has no price and no
+ * `store_inventory` row, so it can be displayed but never added to a sale.
+ */
+export type PendingStockDevice = {
+  unitId: string
+  storeId: string
+  imei: string
+  colour: string
+  /** `null` while the physical measurement is still unknown. Never guessed. */
+  batteryHealth: number | null
+  model: string
+  storageGb: number
+  storage: string
+  receivedAt: string
+}
+
 export type AuthorizedInventoryDevice = {
   inventoryId: string
   storeId: string
@@ -190,6 +207,48 @@ function mapReservationResult(value: unknown): InventoryReservationResult {
     deviceId: typeof row.device_id === "string" ? row.device_id : null,
     reservationStatus: typeof row.reservation_status === "string" ? row.reservation_status : null,
     expiresAt: typeof row.expires_at === "string" ? row.expires_at : null,
+  }
+}
+
+/**
+ * Lists stock that has been received but is not yet sellable.
+ *
+ * Pending units live in `opening_stock_units`, not `store_inventory`, so they
+ * have no price and cannot be reserved or sold. They are surfaced separately so
+ * an employee can see that the handset exists without it ever entering a sale
+ * draft. Reads `pending_stock_view`, which performs its own store-scoped
+ * authorization and exposes no cost or inspection detail.
+ */
+export async function listPendingStock(storeId: string): Promise<PendingStockDevice[]> {
+  assertUuid(storeId, "Store ID")
+  const supabase = await createAuthenticatedInventoryClient()
+  const { data, error } = await supabase
+    .from("pending_stock_view")
+    .select("id, store_id, imei, colour, battery_health, status, received_at, model_name, storage_gb")
+    .eq("store_id", storeId)
+    .order("received_at", { ascending: false })
+
+  if (error) {
+    throw new Error(`Unable to list pending stock: ${error.message}`)
+  }
+
+  return (data ?? []).map((row) => mapPendingStockDevice(row as unknown))
+}
+
+function mapPendingStockDevice(value: unknown): PendingStockDevice {
+  const record = requireRecord(value, "pending stock")
+  const storageGb = requireInteger(record.storage_gb, "storage capacity")
+
+  return {
+    unitId: requireString(record.id, "pending stock ID"),
+    storeId: requireString(record.store_id, "store ID"),
+    imei: requireString(record.imei, "IMEI"),
+    colour: requireString(record.colour, "colour"),
+    batteryHealth: record.battery_health === null ? null : requireInteger(record.battery_health, "battery health"),
+    model: requireString(record.model_name, "model name"),
+    storageGb,
+    storage: `${storageGb}GB`,
+    receivedAt: requireString(record.received_at, "received timestamp"),
   }
 }
 
