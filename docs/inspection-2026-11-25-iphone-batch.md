@@ -814,3 +814,76 @@ recorded.
 3. A re-read of the B2-5 serial number.
 4. Re-supply of the two missing image files.
 5. A positive approved sale price per unit at activation time.
+
+---
+
+# Staging record — 2026-11-26
+
+All 18 documented handsets (10 from Batch 1, 8 from Batch 2) have been **staged**
+into `public.opening_stock_units` against invoice
+`359c8f2c-17d8-48ba-8a41-59abc0dd3706`. **Nothing has been activated, priced or
+sold.**
+
+This needed two forward-only migrations, applied to the hosted project:
+
+| Migration | What it does |
+| --- | --- |
+| `20261126140000_pending_inspection_staging` | `condition` may be null on a staged unit; `inspection` may be a partial attestation document on a staged unit; `receive_opening_stock_devices` accepts both |
+| `20261126140100_temporary_import_authorization` | null-JWT import path for invoice reconciliation and receipt attribution; activation gains a recorded-condition gate |
+
+## What was staged
+
+| Batch | Staged | Battery measured | Battery unknown | Condition pending |
+| --- | --- | --- | --- | --- |
+| Batch 1 | 10 | 1 (100%) | 9 | 10 |
+| Batch 2 | 8 | 2 (85%, 81%) | 6 | 8 |
+| **Total** | **18** | **3** | **15** | **18** |
+
+No IMEI appears twice (`18` rows, `18` distinct IMEIs). `opening_stock_units`
+holds no other rows. `inventory_devices`, `store_inventory` and
+`opening_stock_price_changes` are all still empty, and no staged unit carries an
+`approved_price_pesewas`.
+
+## What each staged row records honestly
+
+Every one of the 18 rows stores exactly the three attestations the inspection
+photos actually evidence — `imei_confirmed_physical`, `identity_labels_match`,
+`activation_lock_cleared` — and nothing else:
+
+```json
+{"imei_confirmed_physical": true, "identity_labels_match": true, "activation_lock_cleared": true}
+```
+
+The five unperformed checks (`display_passed`, `cameras_passed`,
+`buttons_passed`, `connectivity_passed`, `charging_port_passed`) are **absent**,
+not `false` and not `true`. `condition` is `null` on all 18 because no cosmetic
+assessment was performed. `battery_health` is `null` on the 15 handsets reading
+`No Data` and carries the measured value on the other three.
+
+## Activation remains blocked
+
+`private.is_valid_opening_stock_inspection` still requires all eight
+attestations to be literally `true`; it is unchanged. Verified on a real staged
+unit — `activate_opening_stock_unit` rejects with
+`23514: stored IMEI or inspection is not eligible for activation`.
+
+Once the inspection is complete and the condition recorded, a unit still cannot
+be activated without a measured `battery_health`, and still cannot be priced or
+sold without an approved price. The activation path is additionally gated on a
+recorded cosmetic condition now that `condition` is nullable while staged.
+
+## Outstanding
+
+1. **15 units need a measured battery health** before activation.
+2. **18 units need a cosmetic condition** (`excellent` / `good` / `fair`).
+3. **18 units need the five unperformed physical checks** performed and
+   recorded. The inspection document is immutable after receipt, so the
+   completion path needs a manager workflow — it cannot be patched in place.
+4. **Two Batch 2 handsets were never documented** (iPhone 14 128GB Purple,
+   iPhone 13 Pro 128GB Green) and are therefore not staged.
+
+> **Temporary.** The `20261126140100` authorization relaxation is still in place
+> and must be reverted during cleanup, as agreed. A forward-only follow-up
+> migration restores the original `opening_stock_invoice_reconciled` body and
+> drops `private.opening_stock_invoice_totals_match` /
+> `private.opening_stock_recipient_membership` once the import is accepted.
