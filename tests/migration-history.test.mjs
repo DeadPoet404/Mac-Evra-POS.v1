@@ -58,11 +58,39 @@ test("the opening-stock line removal migration sorts after every migration alrea
     "20261124000000_opening_stock_intake.sql",
     "20261124120000_seed_iphone_device_models.sql",
   ]
-  assert.equal(migrations.at(-1), removal, "the removal migration is the newest file")
   for (const name of preExisting) {
     assert.ok(migrations.includes(name), `${name} is still present`)
     assert.ok(name < removal, `${removal} must sort after ${name}`)
   }
+
+  // Later forward-only migrations may sort after the removal migration, but the
+  // removal migration must never stop sorting after the intake tables it alters.
+  const batteryHealth = "20261126081209_unknown_battery_health_staged_units.sql"
+  assert.ok(migrations.includes(batteryHealth), "the unknown-battery migration exists")
+  assert.ok(removal < batteryHealth, `${batteryHealth} must sort after ${removal}`)
+
+  // Pending-inspection staging follows the unknown-battery relaxation, and the
+  // temporary import authorization follows that, because it redefines the
+  // reconciliation helper the staging migration does not touch.
+  const pendingInspection = "20261126140000_pending_inspection_staging.sql"
+  const temporaryAuthorization = "20261126140100_temporary_import_authorization.sql"
+  assert.ok(migrations.includes(pendingInspection), "the pending-inspection migration exists")
+  assert.ok(migrations.includes(temporaryAuthorization), "the temporary authorization migration exists")
+  assert.ok(batteryHealth < pendingInspection, `${pendingInspection} must sort after ${batteryHealth}`)
+
+  // The inspection-completion workflow must sort after the pending-inspection
+  // migration whose columns and RPC it builds on, and after the temporary
+  // authorization it deliberately does not depend on.
+  const inspectionWorkflow = "20261126150000_inspection_completion_workflow.sql"
+  assert.ok(migrations.includes(inspectionWorkflow), "the inspection completion migration exists")
+  assert.ok(pendingInspection < inspectionWorkflow, `${inspectionWorkflow} must sort after ${pendingInspection}`)
+
+  // The receipt-correction path must sort after the intake migration whose
+  // immutability trigger it narrows.
+  const receiptCorrection = "20261126170000_opening_stock_receipt_correction.sql"
+  assert.ok(migrations.includes(receiptCorrection), "the receipt correction migration exists")
+  assert.ok(inspectionWorkflow < receiptCorrection, `${receiptCorrection} must sort after ${inspectionWorkflow}`)
+  assert.equal(migrations.at(-1), receiptCorrection, "the receipt correction migration is the newest file")
 })
 
 test("the removal migration builds on the intake tables it alters", () => {
@@ -103,5 +131,12 @@ test("database suites are numbered uniquely and share the migrations' ordering r
   assert.equal(new Set(numbers).size, numbers.length, "two suites must not share a number")
   const removalSuite = "009_opening_stock_line_removal.test.sql"
   assert.ok(suiteFiles.includes(removalSuite), "the removal suite is picked up by db:test")
-  assert.equal(suiteFiles.at(-1), removalSuite, "the removal suite is the newest suite")
+  assert.ok(suiteFiles.indexOf(removalSuite) >= 0, "the removal suite is registered")
+  // A later suite may follow it, but no suite may reuse or precede its number.
+  const batterySuite = "010_unknown_battery_health.test.sql"
+  if (suiteFiles.includes(batterySuite)) {
+    assert.equal(suiteFiles.at(-1), batterySuite, "the newest suite is the unknown-battery suite")
+  } else {
+    assert.equal(suiteFiles.at(-1), removalSuite, "the removal suite is the newest suite")
+  }
 })

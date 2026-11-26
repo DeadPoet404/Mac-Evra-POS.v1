@@ -320,13 +320,34 @@ test("the next row does not inherit the previous device's physical evidence", ()
   assert.notEqual(next.imei, completeDevice.imei)
 })
 
-test("device validation rejects a missing condition or battery instead of defaulting them", () => {
-  const errors = validateDeviceEntry({ ...completeDevice, condition: "", batteryHealth: "" }, {
+test("device validation still rejects a missing condition instead of defaulting it", () => {
+  const errors = validateDeviceEntry({ ...completeDevice, condition: "" }, {
     existingImeis: [],
     inspectionChecks: checks,
   })
-  assert.ok(errors.condition)
-  assert.ok(errors.batteryHealth)
+  assert.ok(errors.condition, "condition is required and must never default")
+  assert.equal(errors.batteryHealth, undefined, "a blank battery is an unknown reading, not an error")
+})
+
+test("a blank battery is accepted as unknown and never defaulted to a number", () => {
+  // The inspection screen reporting "No Data" must stay unknown rather than
+  // become 0 or 100, so the payload carries an explicit JSON null.
+  const draft = { ...completeDevice, imei: "860000000000017", batteryHealth: "" }
+  assert.deepEqual(validateDeviceEntry(draft, { existingImeis: [], inspectionChecks: checks }), {})
+  const payload = deviceDraftToRpcPayload(draft, openingStockInspectionChecks)
+  assert.equal(payload[0].battery_health, null, "an unknown reading must not be coerced to a number")
+  assert.notEqual(payload[0].battery_health, 0)
+  assert.notEqual(payload[0].battery_health, 100)
+})
+
+test("a supplied battery still has to be a whole percentage in range", () => {
+  const context = { existingImeis: [], inspectionChecks: checks }
+  assert.match(validateDeviceEntry({ ...completeDevice, batteryHealth: "abc" }, context).batteryHealth, /whole percentage/)
+  assert.match(validateDeviceEntry({ ...completeDevice, batteryHealth: "0" }, context).batteryHealth, /between 1 and 100/)
+  assert.match(validateDeviceEntry({ ...completeDevice, batteryHealth: "101" }, context).batteryHealth, /between 1 and 100/)
+  // Inspection attestations are never relaxed by an unknown battery.
+  const partial = { ...completeDevice, batteryHealth: "", checks: { ...completeDevice.checks, camerasPassed: false } }
+  assert.match(validateDeviceEntry(partial, context).inspection, /1 outstanding/)
 })
 
 test("device validation requires every inspection check for this device", () => {

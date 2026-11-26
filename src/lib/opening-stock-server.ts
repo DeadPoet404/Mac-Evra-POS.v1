@@ -82,8 +82,10 @@ export type OpeningStockUnit = {
   deviceModelId: string
   imei: string
   colour: string
-  condition: OpeningStockCondition
-  batteryHealth: number
+  /** `null` until a manager has graded the handset's cosmetic condition. */
+  condition: OpeningStockCondition | null
+  /** `null` while the physical measurement is still unknown. */
+  batteryHealth: number | null
   inspection: Record<string, unknown>
   status: OpeningStockUnitStatus
   approvedPricePesewas: number | null
@@ -95,6 +97,9 @@ export type OpeningStockUnit = {
   receivedAt: string
   activatedByDisplayName: string | null
   activatedAt: string | null
+  /** Who completed the pending physical checks, and when. */
+  inspectionCompletedByDisplayName: string | null
+  inspectionCompletedAt: string | null
 }
 
 export type OpeningStockCorrection = {
@@ -179,6 +184,16 @@ function conditionValue(value: unknown): OpeningStockCondition {
     throw new Error("Opening-stock response has an unsupported device condition.")
   }
   return condition as OpeningStockCondition
+}
+
+/**
+ * A staged unit may legitimately carry no cosmetic condition yet, because the
+ * grading is a physical assessment. `null` here means "not assessed", which is
+ * different from an unrecognised value — the latter is still an error.
+ */
+function optionalConditionValue(value: unknown): OpeningStockCondition | null {
+  if (value === null || value === undefined) return null
+  return conditionValue(value)
 }
 
 function unitStatus(value: unknown): OpeningStockUnitStatus {
@@ -297,8 +312,8 @@ function mapUnit(value: unknown): OpeningStockUnit {
     deviceModelId: requiredString(row.device_model_id, "device model ID"),
     imei: requiredString(row.imei, "IMEI"),
     colour: requiredString(row.colour, "colour"),
-    condition: conditionValue(row.condition),
-    batteryHealth: requiredInteger(row.battery_health, "battery health"),
+    condition: optionalConditionValue(row.condition),
+    batteryHealth: optionalInteger(row.battery_health),
     inspection: requiredRecord(row.inspection, "inspection record"),
     status: unitStatus(row.status),
     approvedPricePesewas: optionalInteger(row.approved_price_pesewas),
@@ -310,6 +325,8 @@ function mapUnit(value: unknown): OpeningStockUnit {
     receivedAt: requiredString(row.received_at, "received timestamp"),
     activatedByDisplayName: optionalString(row.activated_by_display_name),
     activatedAt: optionalString(row.activated_at),
+    inspectionCompletedByDisplayName: optionalString(row.inspection_completed_by_display_name),
+    inspectionCompletedAt: optionalString(row.inspection_completed_at),
   }
 }
 

@@ -5,6 +5,9 @@ import { revalidatePath } from "next/cache"
 import { requirePermissions } from "@/lib/auth/server"
 import {
   parseActivationInput,
+  parseBatteryHealthRecordInput,
+  parseConditionRecordInput,
+  parseInspectionCompletionInput,
   parseConfirmSupplierInvoiceInput,
   parseInvoiceCorrectionInput,
   parseInvoiceLineCorrectionInput,
@@ -484,6 +487,55 @@ export async function receiveDeviceRowInlineAction(
   }
 }
 
+/**
+ * Records a battery measurement that receiving could not obtain.
+ *
+ * The database restricts this to a staged unit whose measurement is still
+ * unknown, so it can never revise a recorded reading and can never touch a
+ * unit that is already sellable. Activation stays a separate, separately
+ * permissioned step.
+ */
+export async function recordBatteryHealthInlineAction(
+  unitId: string,
+  batteryHealth: string
+): Promise<ActionResult> {
+  let parsed
+  try {
+    const formData = new FormData()
+    formData.set("unitId", parseUuid(unitId, "staged unit"))
+    formData.set("batteryHealth", batteryHealth)
+    parsed = parseBatteryHealthRecordInput(formData)
+  } catch (error) {
+    return invalid({ batteryHealth: error instanceof Error ? error.message : "Enter the measured battery health." })
+  }
+
+  const { supabase } = await managerClient()
+  const { error } = await supabase.rpc("record_opening_stock_unit_battery_health", {
+    p_unit_id: parsed.unitId,
+    p_battery_health: parsed.batteryHealth,
+  })
+  if (error) {
+    if (error.code === "23514" && /already recorded/i.test(error.message ?? "")) {
+      return {
+        ok: false,
+        reason: "state-conflict",
+        message: "Battery health is already recorded for this device. Reload to see the stored value.",
+      }
+    }
+    if (error.code === "23514" && /staged unit/i.test(error.message ?? "")) {
+      return {
+        ok: false,
+        reason: "state-conflict",
+        message: "This device is already sellable, so its battery health can no longer change.",
+      }
+    }
+    return failure(error)
+  }
+
+  revalidatePath(route)
+  return { ok: true, message: "Battery health recorded. The device can now be activated.", data: undefined }
+}
+
 export async function activateUnitInlineAction(
   unitId: string,
   approvedPriceGhs: string
@@ -506,7 +558,16 @@ export async function activateUnitInlineAction(
     p_approved_price_pesewas: parsed.approvedPricePesewas,
     p_price_confirmed: true,
   })
-  if (error) return failure(error)
+  if (error) {
+    if (error.code === "23514" && /measured battery health/i.test(error.message ?? "")) {
+      return {
+        ok: false,
+        reason: "state-conflict",
+        message: "Record this device's measured battery health before approving its sale price.",
+      }
+    }
+    return failure(error)
+  }
 
   revalidatePath(route)
   return { ok: true, message: "Device activated into sellable inventory.", data: undefined }
@@ -612,4 +673,107 @@ export async function removeSupplierInvoiceLineInlineAction(
     message: "Line removed. The reason is recorded in the audit history.",
     data: { correctionId: typeof correctionId === "string" ? correctionId : "" },
   }
+}
+
+/* ------------------------------------------------------------------ *
+ * Completing a pending inspection
+ * ------------------------------------------------------------------ */
+
+/**
+ * Records the physical checks a manager has now performed on a staged handset.
+ *
+ * Only the five checks the inspection photos could not evidence are ever sent.
+ * The database merges them into the stored document without touching the three
+ * attestations recorded at receipt, so this action cannot erase evidence even if
+ * the client sends something unexpected — and the client is not trusted to be
+ * the thing that preserves them.
+ */
+export async function completeInspectionInlineAction(
+  unitId: string,
+  checks: Record<string, boolean | undefined>,
+  inspectionNotes: string
+): Promise<ActionResult<{ inspectionReady: boolean }>> {
+  let parsed
+  let resolvedUnitId
+  try {
+    resolvedUnitId = parseUuid(unitId, "staged device")
+    parsed = parseInspectionCompletionInput(checks, inspectionNotes)
+  } catch (error) {
+    return invalid({ inspection: error instanceof Error ? error.message : "Record the checks that passed." })
+  }
+
+  const { supabase } = await managerClient()
+  const { data, error } = await supabase.rpc("complete_opening_stock_inspection", {
+    p_unit_id: resolvedUnitId,
+    p_checks: parsed.checks,
+    p_inspection_notes: parsed.notes,
+  })
+  if (error) {
+    if (error.code === "23514" && /only staged units can be inspected/i.test(error.message ?? "")) {
+      return {
+        ok: false,
+        reason: "state-conflict",
+        message: "Only a staged device can be inspected. This device has already moved on.",
+      }
+    }
+    if (error.code === "23514" && /cannot be removed or overwritten/i.test(error.message ?? "")) {
+      return {
+        ok: false,
+        reason: "state-conflict",
+        message: "Recorded inspection evidence cannot be overwritten. Reload the device and try again.",
+      }
+    }
+    return failure(error)
+  }
+
+  const ready = firstRow(data)?.inspection_ready === true
+  revalidatePath(route)
+  return {
+    ok: true,
+    message: ready
+      ? "All eight checks are recorded. Model the cosmetic condition and battery health before activation."
+      : "Physical checks recorded. The device stays staged until every check, the condition and the battery reading are in.",
+    data: { inspectionReady: ready },
+  }
+}
+
+/**
+ * Records the cosmetic condition a manager assessed on the physical handset.
+ * The database accepts this once per unit and only while it is staged.
+ */
+export async function recordConditionInlineAction(unitId: string, condition: string): Promise<ActionResult> {
+  let parsedCondition
+  let resolvedUnitId
+  try {
+    resolvedUnitId = parseUuid(unitId, "staged device")
+    parsedCondition = parseConditionRecordInput(condition)
+  } catch (error) {
+    return invalid({ condition: error instanceof Error ? error.message : "Select the assessed condition." })
+  }
+
+  const { supabase } = await managerClient()
+  const { error } = await supabase.rpc("record_opening_stock_unit_condition", {
+    p_unit_id: resolvedUnitId,
+    p_condition: parsedCondition,
+  })
+  if (error) {
+    if (error.code === "23514" && /already recorded/i.test(error.message ?? "")) {
+      return {
+        ok: false,
+        reason: "state-conflict",
+        message: "The cosmetic condition is already recorded for this device. Reload to see the stored value.",
+      }
+    }
+    if (error.code === "23514" && /staged unit/i.test(error.message ?? "")) {
+      return {
+        ok: false,
+        reason: "state-conflict",
+        message: "Only a staged device can be graded. This device has already moved on.",
+      }
+    }
+    return failure(error)
+  }
+
+  revalidatePath(route)
+  return { ok: true, message: "Cosmetic condition recorded.", data: undefined }
 }

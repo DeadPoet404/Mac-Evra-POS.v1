@@ -17,6 +17,7 @@
  */
 
 import {
+  inspectionFieldByCheck,
   isValidRealImei,
   normalizeOpeningStockImei,
   openingStockConditions,
@@ -276,16 +277,7 @@ export const IMEI_PLACEHOLDER = "357000000000017"
  * device's attestation is always written with the exact key names that
  * `private.is_valid_opening_stock_inspection` requires.
  */
-export const INSPECTION_FIELD_BY_NAME: Record<string, string> = {
-  imeiConfirmed: "imei_confirmed_physical",
-  labelsMatch: "identity_labels_match",
-  displayPassed: "display_passed",
-  camerasPassed: "cameras_passed",
-  buttonsPassed: "buttons_passed",
-  connectivityPassed: "connectivity_passed",
-  chargingPortPassed: "charging_port_passed",
-  activationLockCleared: "activation_lock_cleared",
-}
+export const INSPECTION_FIELD_BY_NAME: Record<string, string> = inspectionFieldByCheck
 
 /** Rejects the example IMEI shipped in the input placeholder, and other known fake values. */
 export function isPlaceholderImei(value: string) {
@@ -333,13 +325,16 @@ export function validateDeviceEntry(
     errors.condition = "Select excellent, good or fair."
   }
 
-  if (!draft.batteryHealth.trim()) {
-    errors.batteryHealth = "Record the measured battery health."
-  } else if (!/^\d{1,3}$/.test(draft.batteryHealth.trim())) {
-    errors.batteryHealth = "Enter a whole percentage."
-  } else {
-    const battery = Number(draft.batteryHealth)
-    if (battery < 1 || battery > 100) errors.batteryHealth = "Battery health must be between 1 and 100."
+  // A blank battery field is a deliberate "unknown" reading, not a missing
+  // required value: many inspection screens report "No Data". Anything the
+  // operator does type must still be a whole percentage.
+  if (draft.batteryHealth.trim()) {
+    if (!/^\d{1,3}$/.test(draft.batteryHealth.trim())) {
+      errors.batteryHealth = "Enter a whole percentage, or leave blank if unavailable."
+    } else {
+      const battery = Number(draft.batteryHealth)
+      if (battery < 1 || battery > 100) errors.batteryHealth = "Battery health must be between 1 and 100."
+    }
   }
 
   const missingChecks = context.inspectionChecks.filter((check) => draft.checks[check.name] !== true)
@@ -372,7 +367,9 @@ export function deviceDraftToRpcPayload(
       imei: normalizeOpeningStockImei(draft.imei),
       colour: draft.colour.trim(),
       condition: draft.condition,
-      battery_health: Number(draft.batteryHealth),
+      // A blank field is sent as explicit JSON null so the database stores an
+      // unknown measurement rather than rejecting the whole device.
+      battery_health: draft.batteryHealth.trim() ? Number(draft.batteryHealth) : null,
       inspection,
     },
   ]
