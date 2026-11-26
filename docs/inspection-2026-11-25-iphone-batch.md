@@ -4,7 +4,11 @@ Source: ten photos of three restored iPhone handsets read through an iDevice /
 3uTools-style inspection screen, taken on 2026-11-25 in the Mac Evra store.
 
 This document is an extraction record. **No device from this batch has been
-registered yet** — see [Blocking gap](#blocking-gap-battery-health) below.
+registered yet.** The database blocker for the nine handsets reading `No Data`
+was removed by `20261126120000_unknown_battery_health_staged_units.sql` (unknown
+battery health is now allowed on *staged* units only), but registration still
+needs a physical inspection pass and a manager session — see
+[What is still required](#what-is-still-required).
 
 ## Extracted fields
 
@@ -333,8 +337,9 @@ capacity evidence; the product-type strings (`iPhone14,5`, `iPhone13,2`,
 ## Uncertain or unreadable fields
 
 1. **Battery health is unavailable on nine of ten handsets** — `Battery Life`
-   reads `No Data`. Only the iPhone 13 256GB Starlight reports `100%`. This is
-   the blocking gap described below.
+   reads `No Data`. Only the iPhone 13 256GB Starlight reports `100%`. Record
+   the nine as unknown (blank), never as a substitute number; see the section
+   below for how unknown is now handled.
 2. **iPhone 13 Pro serial number** reads `VJR6WM6GYQ` in the blue hyperlink text,
    with the mouse cursor sitting directly over the third and fourth characters.
    The first character is legible as `V` at maximum zoom, but the string is
@@ -356,10 +361,15 @@ capacity evidence; the product-type strings (`iPhone14,5`, `iPhone13,2`,
    the inspection screen and were not assessed. They must not be inferred from
    the photo.
 
-## Blocking gap: battery health
+## Battery health: how unknown is handled now
 
-The existing opening-stock receiving workflow **cannot record a device whose
-battery health is unknown**, and neither can the legacy inventory table:
+> **Status: resolved in code, not yet applied.** The migration below is committed
+> but has *not* been applied to the hosted project. Until it is reviewed and
+> applied, the original constraint described in this section still stands.
+
+Before the migration, the existing opening-stock receiving workflow **could not
+record a device whose battery health is unknown**, and neither could the legacy
+inventory table:
 
 - `public.opening_stock_units.battery_health` is `integer not null` with
   `check (battery_health between 1 and 100)`.
@@ -372,10 +382,19 @@ battery health is unknown**, and neither can the legacy inventory table:
   inspection attestations to be literally `true` before a unit can be received or
   activated.
 
-So for the nine handsets reading `No Data`, there is no way to persist "battery
+So for the nine handsets reading `No Data` there was no way to persist "battery
 health unknown" without either fabricating a number (explicitly forbidden) or
-changing the schema / RPC contract. Registration is therefore **paused at the
-input-validation boundary**, not attempted with invented values.
+changing the schema. `20261126120000_unknown_battery_health_staged_units.sql`
+does the latter, narrowly:
+
+- `opening_stock_units.battery_health` may be `null` **only while staged**;
+- `inventory_devices.battery_health` remains `NOT NULL`;
+- activation refuses an unmeasured unit;
+- `record_opening_stock_unit_battery_health` fills the gap once, staged-only, audited;
+- all eight inspection attestations stay mandatory.
+
+Registration is still **not** attempted here, because the remaining blockers
+below are not code problems.
 
 The eight attestations are also a physical-inspection record — display, cameras,
 buttons, connectivity, charging port, IMEI-vs-device, label match, and Activation
@@ -386,13 +405,10 @@ attested.
 
 ## What is still required
 
-1. **A decision on the unknown-battery case**, one of:
-   - allow `battery_health` to be `null` for staged units only (migration +
-     RPC + inspection-validator change, with activation still requiring a real
-     measurement); or
-   - physically measure battery health on the bench and re-enter the batch; or
-   - leave these handsets out of the system until they are measured.
-   Each option touches validated SQL, so it needs approval before any migration.
+1. ~~A decision on the unknown-battery case~~ — **done**: unknown is allowed on
+   staged units only. Review and apply
+   `20261126120000_unknown_battery_health_staged_units.sql` to the hosted project
+   when it is safe to migrate.
 2. **A physical inspection pass** on all ten handsets to earn the other six
    attestations.
 3. **A manager session with `manage_inventory`, `access_manager_workspace`, and

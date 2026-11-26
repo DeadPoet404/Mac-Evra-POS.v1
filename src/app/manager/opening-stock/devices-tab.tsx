@@ -47,6 +47,7 @@ export function DevicesTab({
   onReceiveDevice,
   onActivate,
   onReprice,
+  onRecordBattery,
 }: {
   invoice: OpeningStockInvoice | null
   lines: readonly OpeningStockInvoiceLine[]
@@ -73,6 +74,7 @@ export function DevicesTab({
     newPriceGhs: string,
     reason: string
   ) => Promise<{ ok: boolean; message?: string }>
+  onRecordBattery: (unitId: string, batteryHealth: string) => Promise<{ ok: boolean; message?: string }>
 }) {
   const [entry, setEntry] = useState<DeviceEntryDraft>(() => emptyDeviceEntry(lines[0]?.id ?? ""))
   const [errors, setErrors] = useState<FieldErrors>({})
@@ -214,7 +216,13 @@ export function DevicesTab({
         </div>
       ) : null}
 
-      <DeviceTable units={invoiceUnits} busy={busy} onActivate={onActivate} onReprice={onReprice} />
+      <DeviceTable
+        units={invoiceUnits}
+        busy={busy}
+        onActivate={onActivate}
+        onReprice={onReprice}
+        onRecordBattery={onRecordBattery}
+      />
     </div>
   )
 }
@@ -383,7 +391,7 @@ function DeviceEntryForm({
             onChange={(event) => onChange({ batteryHealth: event.target.value })}
             inputMode="numeric"
             maxLength={3}
-            placeholder="Measured value"
+            placeholder="Measured value or blank"
             aria-invalid={errors.batteryHealth ? true : undefined}
             className={cn(inputClass, "tabular-nums", errors.batteryHealth && "border-[#A13B34]")}
             onKeyDown={(event) => {
@@ -393,7 +401,14 @@ function DeviceEntryForm({
               }
             }}
           />
-          {errors.batteryHealth ? <FieldError>{errors.batteryHealth}</FieldError> : null}
+          {errors.batteryHealth ? (
+            <FieldError>{errors.batteryHealth}</FieldError>
+          ) : (
+            <p className="mt-1 text-[11px] text-[#86868B]">
+              Leave blank when the inspection reports no battery health. The device stages as unmeasured and cannot be
+              priced until a reading is recorded.
+            </p>
+          )}
         </div>
 
         <div className="sm:col-span-2 lg:col-span-3">
@@ -490,11 +505,13 @@ function DeviceTable({
   busy,
   onActivate,
   onReprice,
+  onRecordBattery,
 }: {
   units: readonly OpeningStockUnit[]
   busy: boolean
   onActivate: (unitId: string, approvedPriceGhs: string) => Promise<{ ok: boolean; message?: string }>
   onReprice: (unitId: string, expectedPriceGhs: string, newPriceGhs: string, reason: string) => Promise<{ ok: boolean; message?: string }>
+  onRecordBattery: (unitId: string, batteryHealth: string) => Promise<{ ok: boolean; message?: string }>
 }) {
   const [expanded, setExpanded] = useState<string | null>(null)
 
@@ -555,12 +572,26 @@ function DeviceTable({
                         {conditionLabel[unit.condition]}
                       </span>
                     </td>
-                    <td className="px-3 py-2 text-right tabular-nums text-[#68686D]">{unit.batteryHealth}%</td>
+                    <td className="px-3 py-2 text-right tabular-nums text-[#68686D]">
+                      {unit.batteryHealth === null ? (
+                        <span className="text-[#8A6517]" title="The inspection reported no battery health">
+                          Not measured
+                        </span>
+                      ) : (
+                        `${unit.batteryHealth}%`
+                      )}
+                    </td>
                     <td className="px-3 py-2">
                       <UnitStatus unit={unit} />
                     </td>
                     <td className="px-2 py-1">
-                      <PriceCell unit={unit} busy={busy} onActivate={onActivate} onReprice={onReprice} />
+                      <PriceCell
+                        unit={unit}
+                        busy={busy}
+                        onActivate={onActivate}
+                        onReprice={onReprice}
+                        onRecordBattery={onRecordBattery}
+                      />
                     </td>
                   </tr>
                   {open ? (
@@ -653,14 +684,43 @@ function PriceCell({
   busy,
   onActivate,
   onReprice,
+  onRecordBattery,
 }: {
   unit: OpeningStockUnit
   busy: boolean
   onActivate: (unitId: string, approvedPriceGhs: string) => Promise<{ ok: boolean; message?: string }>
   onReprice: (unitId: string, expectedPriceGhs: string, newPriceGhs: string, reason: string) => Promise<{ ok: boolean; message?: string }>
+  onRecordBattery: (unitId: string, batteryHealth: string) => Promise<{ ok: boolean; message?: string }>
 }) {
   const [error, setError] = useState("")
   const [pendingPrice, setPendingPrice] = useState<string | null>(null)
+
+  if (unit.status === "staged" && unit.batteryHealth === null) {
+    // Activation requires a measured battery, so the only meaningful action on
+    // this row is recording that measurement.
+    return (
+      <div className="flex flex-col items-end">
+        <EditableCell
+          label={`Measured battery health for IMEI ${unit.imei}`}
+          align="right"
+          inputMode="numeric"
+          value=""
+          placeholder="%"
+          display={<span className="text-[#8A6517]">Record battery</span>}
+          editable={!busy}
+          disabledReason="This membership cannot record a battery measurement."
+          onSave={async (next) => {
+            const result = await onRecordBattery(unit.id, next)
+            if (!result.ok) setError(result.message ?? "The measurement was not accepted.")
+            else setError("")
+            return result
+          }}
+        />
+        {error ? <p className="px-1.5 text-[11px] font-medium text-[#A13B34]">{error}</p> : null}
+        <p className="px-1.5 text-[11px] text-[#86868B]">Measure before pricing</p>
+      </div>
+    )
+  }
 
   if (unit.status === "staged") {
     return (

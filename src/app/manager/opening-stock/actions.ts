@@ -5,6 +5,7 @@ import { revalidatePath } from "next/cache"
 import { requirePermissions } from "@/lib/auth/server"
 import {
   parseActivationInput,
+  parseBatteryHealthRecordInput,
   parseConfirmSupplierInvoiceInput,
   parseInvoiceCorrectionInput,
   parseInvoiceLineCorrectionInput,
@@ -484,6 +485,55 @@ export async function receiveDeviceRowInlineAction(
   }
 }
 
+/**
+ * Records a battery measurement that receiving could not obtain.
+ *
+ * The database restricts this to a staged unit whose measurement is still
+ * unknown, so it can never revise a recorded reading and can never touch a
+ * unit that is already sellable. Activation stays a separate, separately
+ * permissioned step.
+ */
+export async function recordBatteryHealthInlineAction(
+  unitId: string,
+  batteryHealth: string
+): Promise<ActionResult> {
+  let parsed
+  try {
+    const formData = new FormData()
+    formData.set("unitId", parseUuid(unitId, "staged unit"))
+    formData.set("batteryHealth", batteryHealth)
+    parsed = parseBatteryHealthRecordInput(formData)
+  } catch (error) {
+    return invalid({ batteryHealth: error instanceof Error ? error.message : "Enter the measured battery health." })
+  }
+
+  const { supabase } = await managerClient()
+  const { error } = await supabase.rpc("record_opening_stock_unit_battery_health", {
+    p_unit_id: parsed.unitId,
+    p_battery_health: parsed.batteryHealth,
+  })
+  if (error) {
+    if (error.code === "23514" && /already recorded/i.test(error.message ?? "")) {
+      return {
+        ok: false,
+        reason: "state-conflict",
+        message: "Battery health is already recorded for this device. Reload to see the stored value.",
+      }
+    }
+    if (error.code === "23514" && /staged unit/i.test(error.message ?? "")) {
+      return {
+        ok: false,
+        reason: "state-conflict",
+        message: "This device is already sellable, so its battery health can no longer change.",
+      }
+    }
+    return failure(error)
+  }
+
+  revalidatePath(route)
+  return { ok: true, message: "Battery health recorded. The device can now be activated.", data: undefined }
+}
+
 export async function activateUnitInlineAction(
   unitId: string,
   approvedPriceGhs: string
@@ -506,7 +556,16 @@ export async function activateUnitInlineAction(
     p_approved_price_pesewas: parsed.approvedPricePesewas,
     p_price_confirmed: true,
   })
-  if (error) return failure(error)
+  if (error) {
+    if (error.code === "23514" && /measured battery health/i.test(error.message ?? "")) {
+      return {
+        ok: false,
+        reason: "state-conflict",
+        message: "Record this device's measured battery health before approving its sale price.",
+      }
+    }
+    return failure(error)
+  }
 
   revalidatePath(route)
   return { ok: true, message: "Device activated into sellable inventory.", data: undefined }

@@ -83,7 +83,8 @@ export type OpeningStockUnit = {
   imei: string
   colour: string
   condition: OpeningStockCondition
-  batteryHealth: number
+  /** `null` while the physical measurement is still unknown. */
+  batteryHealth: number | null
   inspection: Record<string, unknown>
   status: OpeningStockUnitStatus
   approvedPricePesewas: number | null
@@ -298,7 +299,7 @@ function mapUnit(value: unknown): OpeningStockUnit {
     imei: requiredString(row.imei, "IMEI"),
     colour: requiredString(row.colour, "colour"),
     condition: conditionValue(row.condition),
-    batteryHealth: requiredInteger(row.battery_health, "battery health"),
+    batteryHealth: optionalInteger(row.battery_health),
     inspection: requiredRecord(row.inspection, "inspection record"),
     status: unitStatus(row.status),
     approvedPricePesewas: optionalInteger(row.approved_price_pesewas),

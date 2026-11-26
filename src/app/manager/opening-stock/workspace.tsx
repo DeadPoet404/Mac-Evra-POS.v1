@@ -17,6 +17,7 @@ import {
   correctSupplierInvoiceLineInlineAction,
   createSupplierInvoiceInlineAction,
   receiveDeviceRowInlineAction,
+  recordBatteryHealthInlineAction,
   removeSupplierInvoiceLineInlineAction,
   repriceInlineAction,
 } from "./actions"
@@ -346,6 +347,18 @@ export function OpeningStockWorkspace({
             onReceiveDevice={(input, existingImeis) =>
               withBusy(async () => {
                 const result = await receiveDeviceRowInlineAction(input, existingImeis)
+                if (result.ok) {
+                  announce("ok", result.message)
+                  refresh()
+                } else {
+                  announce("error", result.message)
+                }
+                return result
+              })
+            }
+            onRecordBattery={(unitId, batteryHealth) =>
+              withBusy(async () => {
+                const result = await recordBatteryHealthInlineAction(unitId, batteryHealth)
                 if (result.ok) {
                   announce("ok", result.message)
                   refresh()

@@ -44,7 +44,12 @@ export type OpeningStockDeviceInput = {
   imei: string
   colour: string
   condition: OpeningStockCondition
-  battery_health: number
+  /**
+   * `null` means the inspection screen reported no battery health ("No Data").
+   * It is not zero and it is never a default. An unknown reading may be staged
+   * but must be measured before the unit can be activated.
+   */
+  battery_health: number | null
   inspection: OpeningStockInspection
 }
 
@@ -229,12 +234,30 @@ function parseCommonDeviceFields(form: FormLike) {
   if (!openingStockConditions.includes(conditionValue as OpeningStockCondition)) {
     throw new Error("Select a valid inspected condition.")
   }
-  const batteryHealth = parsePositiveInteger(formString(form, "batteryHealth"), "battery health", 100)
   return {
     colour,
     condition: conditionValue as OpeningStockCondition,
-    battery_health: batteryHealth,
+    battery_health: parseOptionalBatteryHealth(formString(form, "batteryHealth")),
     inspection: parseInspectionInput(form),
+  }
+}
+
+/**
+ * A blank battery field means the inspection reported no measurement, which is
+ * recorded as unknown rather than guessed. A supplied value must still be a
+ * whole percentage in 1..100, so a typo can never be stored as "unknown".
+ */
+export function parseOptionalBatteryHealth(value: FormDataEntryValue | string | null | undefined) {
+  const input = typeof value === "string" ? value.trim() : ""
+  if (!input) return null
+  return parsePositiveInteger(input, "battery health", 100)
+}
+
+/** Fills in a battery measurement that receiving recorded as unknown. */
+export function parseBatteryHealthRecordInput(form: FormLike) {
+  return {
+    unitId: parseUuid(formString(form, "unitId"), "staged unit"),
+    batteryHealth: parsePositiveInteger(formString(form, "batteryHealth"), "battery health", 100),
   }
 }
 
