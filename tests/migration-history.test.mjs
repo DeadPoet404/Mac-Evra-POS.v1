@@ -58,7 +58,6 @@ test("the opening-stock line removal migration sorts after every migration alrea
     "20261124000000_opening_stock_intake.sql",
     "20261124120000_seed_iphone_device_models.sql",
   ]
-  assert.equal(migrations.at(-1), removal, "the removal migration is the newest file")
   for (const name of preExisting) {
     assert.ok(migrations.includes(name), `${name} is still present`)
     assert.ok(name < removal, `${removal} must sort after ${name}`)

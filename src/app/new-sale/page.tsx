@@ -27,10 +27,14 @@ const errors: Record<string, string> = {
 export default async function NewSalePage({
   searchParams,
 }: {
-  searchParams: Promise<{ sale?: string; notice?: string; error?: string }>
+  searchParams: Promise<{ sale?: string; notice?: string; error?: string; from?: string }>
 }) {
   const { access, membership } = await requirePermissions(["create_sales"], { nextPath: "/new-sale" })
   const params = await searchParams
+  const allowedReturnPaths = ["/home", "/trade-in", "/inventory"]
+const returnTo = allowedReturnPaths.includes(params.from ?? "")
+  ? params.from!
+  : "/home"
   const selectedSale = params.sale ? await getPersistentSale(membership.storeId, params.sale) : null
 
   if (!params.sale) {
@@ -51,9 +55,6 @@ export default async function NewSalePage({
 
   const inventory = selectedSale ? await listAuthorizedInventory(membership.storeId) : []
 
-  if (selectedSale && params.notice === "item-added") {
-    redirect(employeeSaleStepHref("payment", selectedSale.id))
-  }
   if (selectedSale?.status === "awaiting_payment") {
     redirect(employeeSaleStepHref("payment", selectedSale.id))
   }
@@ -73,9 +74,25 @@ export default async function NewSalePage({
   )
   const canReserve = membership.permissions.includes("reserve_inventory")
 
+  // The scanner and manual IMEI entry are full-screen experiences.
+  // Do not wrap them in the previous New Sale page layout.
+  if (selectedSale && canReserve) {
+    return (
+      <ImeiVerification
+        saleId={selectedSale.id}
+        inventory={inventory}
+        canReserve={canReserve}
+        hasAddedProduct={activeItems.length > 0}
+        saleTotalPesewas={selectedSale.totalPesewas}
+        productCount={activeItems.length}
+        returnTo={returnTo}
+      />
+    )
+  }
+
   return (
     <main className="min-h-screen bg-[#FAFAFC] pb-16 text-[#1D1D1F]">
-      <EmployeeHeader title="New sale" backHref="/home" backLabel="Home" />
+      <EmployeeHeader title="New sale" backHref={returnTo} backLabel={returnTo === "/trade-in" ? "Swap" : returnTo === "/inventory" ? "Inventory" : "Home"} />
       <div className="mx-auto w-full max-w-2xl px-5 pt-9 sm:px-6">
         <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#86868B]">Step 1 of 4</p>
         <h1 className="mt-2 text-[38px] font-semibold tracking-[-1.2px] text-[#6E0728] sm:text-[44px]">Verify the IMEI.</h1>
@@ -91,10 +108,11 @@ export default async function NewSalePage({
               <h2 className="mt-5 text-xl font-semibold">Start a sale</h2>
               <p className="mx-auto mt-2 max-w-sm text-sm text-[#86868B]">Start when the device is ready to scan.</p>
               <form action={createSaleDraftAction} className="mt-6">
-                <button type="submit" className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-full bg-[#6E0728] px-8 text-base font-semibold text-white hover:bg-[#57051F] sm:w-auto">
-                  <FilePlus2 size={19} /> Start sale
-                </button>
-              </form>
+  <input type="hidden" name="from" value={returnTo} />
+  <button type="submit" className="inline-flex h-14 w-full items-center justify-center gap-2 rounded-full bg-[#6E0728] px-8 text-base font-semibold text-white hover:bg-[#57051F] sm:w-auto">
+    <FilePlus2 size={19} /> Start sale
+  </button>
+</form>
             </section>
           </div>
         ) : !selectedSale ? (
@@ -142,14 +160,9 @@ export default async function NewSalePage({
             </form>
           </div>
         ) : canReserve ? (
-          <div className="mt-8">
-            <ImeiVerification saleId={selectedSale.id} inventory={inventory} canReserve={canReserve} />
-            <form action={cancelSaleAction} className="mt-8 text-center">
-              <input type="hidden" name="saleId" value={selectedSale.id} />
-              <input type="hidden" name="reason" value="cancelled by employee" />
-              <button type="submit" className="text-sm font-semibold text-[#86868B]">Cancel sale</button>
-            </form>
-          </div>
+          <p className="mt-8 text-sm text-[#68686D]">
+            Open the scanner to continue this sale.
+          </p>
         ) : (
           <p className="mt-8 rounded-2xl border border-[#E8C9D2] bg-[#FCF4F6] p-5 text-sm font-medium text-[#6E0728]">Your account cannot verify sale inventory.</p>
         )}

@@ -1,4 +1,4 @@
-import { CircleAlert, Smartphone, UserRound } from "lucide-react"
+import { CircleAlert } from "lucide-react"
 import Link from "next/link"
 import { redirect } from "next/navigation"
 
@@ -6,12 +6,12 @@ import { createSaleCustomerAction } from "@/app/new-sale/actions"
 import { EmployeeHeader } from "@/components/employee/employee-header"
 import { requirePermissions } from "@/lib/auth/server"
 import { employeeSaleStepHref } from "@/lib/sale-journey"
-import { formatPesewas } from "@/lib/sales"
 import { getPersistentSale } from "@/lib/sales-server"
 
 const successNotices = new Set(["customer-created", "customer-existing"])
+
 const errors: Record<string, string> = {
-  "invalid-customer": "Check the customer name, phone number, and email.",
+  "invalid-customer": "Check the customer name and phone number.",
   "customer-create-failed": "The customer details could not be saved. Try again.",
 }
 
@@ -20,112 +20,130 @@ export default async function CustomerInfoPage({
 }: {
   searchParams: Promise<{ sale?: string; notice?: string; error?: string }>
 }) {
-  const { membership } = await requirePermissions(["create_sales"], { nextPath: "/new-sale/customer-info" })
+  const { membership } = await requirePermissions(["create_sales"], {
+    nextPath: "/new-sale/customer-info",
+  })
+
   const params = await searchParams
-  const sale = params.sale ? await getPersistentSale(membership.storeId, params.sale) : null
+  const sale = params.sale
+    ? await getPersistentSale(membership.storeId, params.sale)
+    : null
 
   if (sale && params.notice && successNotices.has(params.notice)) {
     redirect(employeeSaleStepHref("complete", sale.id))
   }
+
   if (sale?.status === "cancelled") {
     redirect(employeeSaleStepHref("complete", sale.id))
   }
+
   if (sale && (sale.status !== "completed" || sale.payment?.status !== "confirmed")) {
     redirect(employeeSaleStepHref("payment", sale.id))
   }
+
   if (sale?.customer) {
     redirect(employeeSaleStepHref("complete", sale.id))
   }
 
   const activeItems = sale?.items.filter((item) => item.status === "active") ?? []
-  if (sale && activeItems.length !== 1) {
+
+  if (sale && activeItems.length === 0) {
     redirect(employeeSaleStepHref("complete", sale.id))
   }
-  const item = activeItems[0]
 
   return (
-    <main className="min-h-screen bg-[#FAFAFC] pb-16 text-[#1D1D1F]">
-      <EmployeeHeader title="Customer" backHref={sale ? employeeSaleStepHref("payment", sale.id) : "/new-sale"} backLabel="Back" />
-      <div className="mx-auto w-full max-w-2xl px-5 pt-9 sm:px-6">
-        <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-[#86868B]">Step 3 of 4</p>
-        <h1 className="mt-2 text-[38px] font-semibold tracking-[-1.2px] text-[#6E0728] sm:text-[44px]">Customer details.</h1>
-        <p className="mt-2 text-base text-[#68686D]">Payment is recorded. Add the customer receiving this device.</p>
+    <main className="min-h-screen bg-white pb-[calc(100px+env(safe-area-inset-bottom))] text-[#111111]">
+      <EmployeeHeader
+        title=""
+        backHref={sale ? employeeSaleStepHref("payment", sale.id) : "/new-sale"}
+        backLabel="Back"
+      />
 
-        {params.error && errors[params.error] ? <p role="alert" className="mt-6 rounded-2xl border border-[#E8C9D2] bg-[#FCF4F6] px-5 py-4 text-sm font-medium text-[#6E0728]">{errors[params.error]}</p> : null}
+      <div className="mx-auto w-full max-w-[430px] px-5 pt-9">
+        <h1 className="max-w-[360px] text-[30px] font-semibold leading-[1.12] tracking-[-0.8px] text-black">
+          A Few Details Before
+          <br />
+          We Continue
+        </h1>
 
-        {!sale || !item ? (
-          <section className="mt-8 rounded-3xl border border-dashed border-[#D8D8DC] bg-white p-10 text-center">
+        <p className="mt-4 max-w-[370px] text-[15px] leading-[1.55] text-[#686868]">
+          Enter the customer's contact information to keep the transaction
+          organised and make future purchases easier.
+        </p>
+
+        {params.error && errors[params.error] ? (
+          <p
+            role="alert"
+            className="mt-6 rounded-2xl border border-[#E8C9D2] bg-[#FCF4F6] px-4 py-3 text-sm font-medium text-[#6E0728]"
+          >
+            {errors[params.error]}
+          </p>
+        ) : null}
+
+        {!sale || activeItems.length === 0 ? (
+          <section className="mt-8 rounded-3xl border border-dashed border-[#D8D8DC] bg-white p-8 text-center">
             <CircleAlert className="mx-auto size-8 text-[#A1A1A6]" />
             <h2 className="mt-4 font-semibold">Verify a device first</h2>
-            <Link href="/new-sale" className="mt-4 inline-block text-sm font-semibold text-[#6E0728]">Return to IMEI verification</Link>
+            <Link
+              href="/new-sale"
+              className="mt-4 inline-block text-sm font-semibold text-[#111111] underline"
+            >
+              Return to IMEI verification
+            </Link>
           </section>
         ) : (
-          <div className="mt-8 space-y-5">
-            <section className="flex items-center justify-between gap-4 rounded-2xl border border-[#E8E8ED] bg-white p-4">
-              <div className="flex min-w-0 items-center gap-3">
-                <span className="flex size-11 shrink-0 items-center justify-center rounded-xl bg-[#F5EDF0] text-[#6E0728]"><Smartphone size={20} /></span>
-                <div className="min-w-0"><p className="truncate font-semibold">{item.description}</p><p className="mt-1 font-mono text-xs text-[#86868B]">{item.imei}</p></div>
-              </div>
-              <p className="shrink-0 font-semibold text-[#6E0728]">{formatPesewas(item.lineTotalPesewas)}</p>
-            </section>
+          <form action={createSaleCustomerAction} className="mt-9">
+            <input type="hidden" name="saleId" value={sale.id} />
 
-            <form action={createSaleCustomerAction} className="rounded-3xl border border-[#E8E8ED] bg-white p-5 shadow-sm sm:p-8">
-              <input type="hidden" name="saleId" value={sale.id} />
-              <div className="space-y-5">
-                <Field
-                  label="Full name"
+            <div className="space-y-6">
+              <label className="block">
+                <span className="mb-3 block text-[15px] font-semibold text-[#171717]">
+                  Customer name
+                </span>
+                <input
                   name="fullName"
+                  type="text"
                   defaultValue={sale.customer?.fullName ?? ""}
                   autoComplete="name"
                   required
                   maxLength={160}
-                  placeholder="Customer's full name"
+                  placeholder="Enter full Name"
+                  className="h-[86px] w-full rounded-[20px] border border-[#292929] bg-white px-5 text-[17px] text-black outline-none placeholder:text-[#A0A0A0] focus:border-black focus:ring-2 focus:ring-black/10"
                 />
-                <Field
-                  label="Phone number"
+              </label>
+
+              <label className="block">
+                <span className="mb-3 block text-[15px] font-semibold text-[#171717]">
+                  Phone number
+                </span>
+                <input
                   name="phone"
                   type="tel"
+                  inputMode="numeric"
+                  pattern="[0-9]*"
                   defaultValue={sale.customer?.phone ?? ""}
                   autoComplete="tel"
-                  inputMode="tel"
                   required
-                  maxLength={32}
-                  placeholder="024 000 0000"
+                  maxLength={15}
+                  placeholder="XXXX.XXXXX.XXX"
+                  className="h-[102px] w-full rounded-[20px] border border-[#292929] bg-white px-5 text-[17px] text-black outline-none placeholder:text-[#A0A0A0] focus:border-black focus:ring-2 focus:ring-black/10"
                 />
-                <Field
-                  label="Email"
-                  optional
-                  name="email"
-                  type="email"
-                  defaultValue={sale.customer?.email ?? ""}
-                  autoComplete="email"
-                  maxLength={320}
-                  placeholder="customer@example.com"
-                />
+              </label>
+            </div>
+
+            <div className="fixed inset-x-0 bottom-0 z-30 border-t border-black/[0.06] bg-white/95 px-5 pb-[calc(14px+env(safe-area-inset-bottom))] pt-3 backdrop-blur">
+              <div className="mx-auto w-full max-w-[390px]">
+                <button
+                  type="submit"
+                  className="h-[50px] w-full rounded-[14px] bg-black px-6 text-[16px] font-semibold text-white transition hover:bg-[#252525] active:scale-[0.99]"
+                >
+                  Checkout
+                </button>
               </div>
-              <button type="submit" className="mt-7 inline-flex h-14 w-full items-center justify-center gap-2 rounded-full bg-[#6E0728] px-8 text-base font-semibold text-white hover:bg-[#57051F]">
-                <UserRound size={19} /> Continue
-              </button>
-            </form>
-          </div>
+            </div>
+          </form>
         )}
       </div>
     </main>
-  )
-}
-
-function Field({
-  label,
-  optional = false,
-  ...props
-}: {
-  label: string
-  optional?: boolean
-} & React.InputHTMLAttributes<HTMLInputElement>) {
-  return (
-    <label className="block text-sm font-semibold">
-      {label}{optional ? <span className="ml-1 font-normal text-[#86868B]">(optional)</span> : null}
-      <input {...props} className="mt-2 h-14 w-full rounded-2xl border border-[#D8D8DC] bg-[#FAFAFC] px-4 text-base outline-none transition focus:border-[#6E0728] focus:ring-4 focus:ring-[#6E0728]/10" />
-    </label>
   )
 }

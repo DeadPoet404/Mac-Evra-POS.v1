@@ -31,24 +31,52 @@ function refreshSalePages() {
   revalidatePath("/manager/sales")
 }
 
-export async function createSaleDraftAction() {
+export async function createSaleDraftAction(formData: FormData) {
   const { membership } = await requirePermissions(["create_sales"], { nextPath: "/new-sale" })
+
+  const allowedPaths = ["/home", "/trade-in", "/inventory"]
+  const requestedPath = String(formData.get("from") ?? "")
+  const returnTo = allowedPaths.includes(requestedPath) ? requestedPath : "/home"
+
   const supabase = await createClient()
-  const { data, error } = await supabase.rpc("create_sale_draft", { p_store_id: membership.storeId })
+  const { data, error } = await supabase.rpc("create_sale_draft", {
+    p_store_id: membership.storeId,
+  })
+
   const row = firstRow(data)
-  if (error || typeof row?.sale_id !== "string") redirect("/new-sale?error=draft-create-failed")
+
+  if (error || typeof row?.sale_id !== "string") {
+    redirect(`/new-sale?error=draft-create-failed&from=${encodeURIComponent(returnTo)}`)
+  }
+
   refreshSalePages()
-  redirect(`/new-sale?sale=${encodeURIComponent(row.sale_id)}&notice=draft-created`)
+
+  redirect(
+    `/new-sale?sale=${encodeURIComponent(row.sale_id)}&notice=draft-created&from=${encodeURIComponent(returnTo)}`
+  )
 }
 
 export async function addSaleItemAction(formData: FormData) {
   await requirePermissions(["create_sales", "reserve_inventory"], { nextPath: "/new-sale" })
   const saleId = formUuid(formData, "saleId")
   const deviceId = formUuid(formData, "deviceId")
+
+  let unitPricePesewas: number
+  try {
+    unitPricePesewas = parseGhsToPesewas(String(formData.get("sellingPriceGhs") ?? ""))
+  } catch {
+    redirect(`/new-sale?sale=${encodeURIComponent(saleId)}&error=invalid-selling-price`)
+  }
+
+  if (!Number.isSafeInteger(unitPricePesewas) || unitPricePesewas <= 0) {
+    redirect(`/new-sale?sale=${encodeURIComponent(saleId)}&error=invalid-selling-price`)
+  }
+
   const supabase = await createClient()
   const { data, error } = await supabase.rpc("add_sale_item", {
     p_sale_id: saleId,
     p_device_id: deviceId,
+    p_unit_price_pesewas: unitPricePesewas,
   })
   const result = firstRow(data)?.result
   if (error) redirect(`/new-sale?sale=${encodeURIComponent(saleId)}&error=item-add-failed`)
